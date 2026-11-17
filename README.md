@@ -40,6 +40,23 @@ game, with no risk of a drifting re-implementation.
 
 ## Playing the game
 
+### On the web (GitHub Pages)
+
+Every push to `main` auto-deploys the game via
+`.github/workflows/pages.yml`, so the latest changes are playable at:
+
+```
+https://trombonestevens.github.io/exponent_game/
+```
+
+**One-time setup** (repo owner, in the GitHub UI): **Settings → Pages →
+Build and deployment → Source: _GitHub Actions_**. After that the workflow runs
+on every push to `main` (and can be re-run from the **Actions** tab). The deploy
+publishes only the browser assets (`index.html`, `styles.css`, `economy.js`,
+`game.js`); the Node simulator is left out of the published site.
+
+### Locally
+
 The game is a static site. Serve the folder over HTTP (needed so the CDN script
 and `localStorage` work against a real origin):
 
