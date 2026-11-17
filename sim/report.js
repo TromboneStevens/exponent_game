@@ -1,11 +1,4 @@
-/* Output and analysis helpers for simulation results.
- *
- * Turns the structured result from simulator.simulate() into:
- *   - CSV time series (one row per sample, columns per generator) for spreadsheet/plotting
- *   - a milestones CSV / table (time-to-goal analysis)
- *   - a human-readable console summary
- *   - raw JSON dump
- */
+/* Output and analysis helpers for simulation results. */
 
 "use strict";
 
@@ -26,45 +19,36 @@ function fmtTime(seconds) {
   return `${dd}d${rh ? " " + rh + "h" : ""}`;
 }
 
-/* ---------- CSV builders ---------- */
+/* ---------- CSV ---------- */
 
 function seriesToCsv(result) {
   const genIds = E.GENERATORS.map((g) => g.id);
-  const header = ["t_seconds", "energy", "totalEarned", "perSec", "cores", "coreMult", "upgradesOwned", "prestiges", ...genIds.map((id) => "gen_" + id)];
+  const header = ["t_seconds", "energy", "totalEarned", "perSec", "depth", "prestigeLevel", "points", "lifetimePoints", "macroResets", "idols", ...genIds.map((id) => "gen_" + id)];
   const rows = [header.join(",")];
   for (const row of result.series) {
-    const line = [
-      row.t,
-      row.energy,
-      row.totalEarned,
-      row.perSec,
-      row.cores,
-      row.coreMult,
-      row.upgradesOwned,
-      row.prestiges,
+    rows.push([
+      row.t, row.energy, row.totalEarned, row.perSec,
+      row.depth.toFixed(4), row.prestigeLevel, row.points, row.lifetimePoints, row.macroResets,
+      csv((row.idols || []).join("|")),
       ...genIds.map((id) => row.generators[id] || 0),
-    ];
-    rows.push(line.join(","));
+    ].join(","));
   }
   return rows.join("\n") + "\n";
 }
 
 function milestonesToCsv(results) {
-  // Accepts a single result or an array (for strategy comparisons).
   const list = Array.isArray(results) ? results : [results];
-  const header = ["strategy", "milestone", "label", "metric", "target", "time_seconds", "time_human", "reached"];
+  const header = ["strategy", "milestone", "label", "metric", "target", "time_seconds", "time_human", "reached", "depth_at", "points_at"];
   const rows = [header.join(",")];
   for (const r of list) {
     for (const m of r.milestones) {
       rows.push([
-        csv(r.meta.strategy),
-        csv(m.id),
-        csv(m.label),
-        m.metric,
-        m.target,
+        csv(r.meta.strategy), csv(m.id), csv(m.label), m.metric, m.target,
         m.timeSeconds == null ? "" : m.timeSeconds,
         fmtTime(m.timeSeconds),
         m.timeSeconds != null ? "yes" : "no",
+        m.depth != null ? m.depth.toFixed(3) : "",
+        m.points != null ? m.points : "",
       ].join(","));
     }
   }
@@ -82,28 +66,27 @@ function summaryText(result) {
   const m = result.meta;
   const f = result.final;
   const lines = [];
-  lines.push(`Strategy:   ${m.strategy}`);
-  lines.push(`Simulated:  ${fmtTime(m.durationSeconds)} of game time  (step ${m.stepSeconds}s, ${m.tapsPerSecond} taps/s${m.autoPrestige ? ", auto-prestige" : ""})`);
-  lines.push(`Final energy:   ${E.fmt(D(f.energy))}   (${E.fmt(D(f.perSec))}/s)`);
-  lines.push(`Lifetime earned: ${E.fmt(D(f.totalEarned))}`);
-  lines.push(`Cores:      ${E.fmt(D(f.cores))}   (×${f.coreMult.toFixed(2)} boost)   prestiges: ${f.prestiges}`);
+  lines.push(`Strategy:    ${m.strategy}   (seed ${m.seed})`);
+  lines.push(`Simulated:   ${fmtTime(m.durationSeconds)} of game time (step ${m.stepSeconds}s)`);
+  lines.push(`Final:       P${f.prestigeLevel} (depth ${f.depth.toFixed(2)})   ${E.fmt(D(f.perSec))}/s`);
+  lines.push(`Energy:      ${E.fmt(D(f.energy))}   (lifetime ${E.fmt(D(f.totalEarned))})`);
+  lines.push(`Points:      ${E.fmt(D(f.points))} now   ${E.fmt(D(f.lifetimePoints))} lifetime   |   ${f.macroResets} macro-resets`);
+  lines.push(`Idols (run): ${f.idols.length ? f.idols.map((id) => E.idolDef(id)?.name || id).join(", ") : "(none)"}`);
+  const metaLvls = E.META_UPGRADES.filter((u) => (f.metaLevels[u.id] || 0) > 0).map((u) => `${u.id}:${f.metaLevels[u.id]}`);
+  lines.push(`Meta-shop:   ${metaLvls.length ? metaLvls.join("  ") : "(none)"}`);
   const owned = E.GENERATORS.map((g) => `${g.id}:${f.generators[g.id] || 0}`).join("  ");
-  lines.push(`Generators: ${owned}`);
-  const ups = E.UPGRADES.filter((u) => f.upgrades[u.id]).map((u) => u.id);
-  lines.push(`Upgrades:   ${ups.length ? ups.join(", ") : "(none)"}`);
+  lines.push(`Generators:  ${owned}`);
   if (result.milestones.length) {
     lines.push("Milestones:");
     for (const mi of result.milestones) {
-      lines.push(`   ${pad(mi.label, 28)} ${mi.timeSeconds != null ? fmtTime(mi.timeSeconds) : "not reached"}`);
+      lines.push(`   ${pad(mi.label, 24)} ${mi.timeSeconds != null ? fmtTime(mi.timeSeconds) : "not reached"}`);
     }
   }
   return lines.join("\n");
 }
 
-// Side-by-side milestone table across multiple strategy results.
 function comparisonTable(results) {
   const strategies = results.map((r) => r.meta.strategy);
-  // Union of milestone ids, preserving first-seen order.
   const ids = [];
   const labels = {};
   for (const r of results) {
@@ -123,36 +106,18 @@ function comparisonTable(results) {
     });
     rows.push(pad(labels[id], col0) + " | " + cells.join(" | "));
   }
-  // Final-energy row for a quick power comparison.
-  const finals = results.map((r) => pad(E.fmt(D(r.final.perSec)) + "/s", colW));
   rows.push(sep);
-  rows.push(pad("final rate", col0) + " | " + finals.join(" | "));
+  rows.push(pad("final P-level", col0) + " | " + results.map((r) => pad("P" + r.final.prestigeLevel, colW)).join(" | "));
+  rows.push(pad("lifetime pts", col0) + " | " + results.map((r) => pad(E.fmt(D(r.final.lifetimePoints)), colW)).join(" | "));
+  rows.push(pad("macro-resets", col0) + " | " + results.map((r) => pad(String(r.final.macroResets), colW)).join(" | "));
   return rows.join("\n");
 }
 
-function pad(s, n) {
-  s = String(s);
-  return s.length >= n ? s : s + " ".repeat(n - s.length);
-}
+function pad(s, n) { s = String(s); return s.length >= n ? s : s + " ".repeat(n - s.length); }
 
 /* ---------- File writing ---------- */
 
-function ensureDir(dir) {
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-}
+function ensureDir(dir) { if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true }); }
+function write(filePath, contents) { ensureDir(path.dirname(filePath)); fs.writeFileSync(filePath, contents); return filePath; }
 
-function write(filePath, contents) {
-  ensureDir(path.dirname(filePath));
-  fs.writeFileSync(filePath, contents);
-  return filePath;
-}
-
-module.exports = {
-  fmtTime,
-  seriesToCsv,
-  milestonesToCsv,
-  summaryText,
-  comparisonTable,
-  write,
-  ensureDir,
-};
+module.exports = { fmtTime, seriesToCsv, milestonesToCsv, summaryText, comparisonTable, write, ensureDir };
