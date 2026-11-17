@@ -8,73 +8,68 @@
 <meta http-equiv="Pragma" content="no-cache" />
 <meta name="theme-color" content="#0b0f1a" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
-<title>Quantum Forge — Idle</title>
+<title>Infinity Slayer</title>
 <!-- break_infinity.js: fast large-number math for incremental games -->
 <script src="https://cdn.jsdelivr.net/npm/break_infinity.js@2"></script>
 <link rel="stylesheet" href="styles.css" />
-<!-- Shared economy module: must load before game.js (the UI layer) -->
-<script src="economy.js"></script>
+<!-- Combat economy module: must load before game.js (the UI layer) -->
+<script src="combat.js"></script>
 </head>
 <body>
   <div id="app">
     <header class="topbar">
       <div class="brand">
-        <span class="logo">⚛</span>
-        <span class="title">Quantum Forge</span>
+        <span class="logo">⚔</span>
+        <span class="title">Infinity Slayer</span>
       </div>
       <button id="menuBtn" class="icon-btn" aria-label="Menu">☰</button>
     </header>
 
-    <section class="hero">
-      <div class="currency">
-        <div class="currency-value" id="energyValue">0</div>
-        <div class="currency-label">Quantum Energy</div>
-      </div>
-      <div class="rate" id="energyRate">0 / sec</div>
-
-      <!-- Prestige depth: continuous P-level progress -->
-      <div class="depth">
-        <div class="depth-head">
-          <span class="depth-level" id="depthLevel">P0</span>
-          <span class="depth-next" id="depthNext"></span>
-        </div>
-        <div class="depth-bar"><div class="depth-fill" id="depthFill"></div></div>
+    <!-- ===== Battle stage (upper screen) ===== -->
+    <section class="stage" id="stage">
+      <div class="stage-head">
+        <span class="stage-name" id="stageName">Green Meadows</span>
+        <span class="stage-kills" id="stageKills">0 / 40</span>
       </div>
 
-      <!-- Active idols for this run -->
-      <div class="idol-strip" id="idolStrip"></div>
-
-      <div class="prestige-strip">
-        <div class="prestige-info">
-          <span class="chip">◈ <b id="pointsValue">0</b> Points</span>
-          <span class="chip">⟳ <b id="resetCount">0</b> resets</span>
+      <div class="arena" id="arena">
+        <!-- Hero on the left, enemy on the right -->
+        <div class="hero" id="hero" aria-label="Hero">
+          <div class="sprite hero-sprite">🧝</div>
         </div>
-        <button id="macroBtn" class="prestige-btn" disabled>
-          Macro-Reset for <b id="pointsGain">0</b> ◈
-        </button>
+
+        <div class="combat-space">
+          <div class="dps-readout"><b id="dpsValue">1</b> DPS</div>
+          <div class="floaters" id="floaters"></div>
+        </div>
+
+        <div class="enemy" id="enemy" aria-label="Enemy">
+          <div class="sprite enemy-sprite" id="enemySprite">👺</div>
+          <div class="enemy-name" id="enemyName">Goblin</div>
+          <div class="hp-bar">
+            <div class="hp-fill" id="hpFill"></div>
+            <span class="hp-text" id="hpText">4 / 4</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Boss attempt control -->
+      <div class="boss-strip">
+        <button id="bossBtn" class="boss-btn hidden">⚔ Attempt Boss</button>
+        <div class="boss-hint" id="bossHint"></div>
       </div>
     </section>
 
-    <nav class="tabs">
-      <button class="tab active" data-tab="generators">Generators</button>
-      <button class="tab" data-tab="upgrades">Upgrades</button>
-      <button class="tab" data-tab="meta">Meta ◈</button>
-    </nav>
+    <!-- ===== Gold + upgrades (lower screen) ===== -->
+    <section class="gold-bar">
+      <span class="gold-icon">🪙</span>
+      <span class="gold-value" id="goldValue">0</span>
+      <span class="gold-label">gold</span>
+    </section>
 
     <main class="panel">
-      <div id="tab-generators" class="tab-content active"></div>
-      <div id="tab-upgrades" class="tab-content"></div>
-      <div id="tab-meta" class="tab-content"></div>
+      <div id="upgradeList" class="upgrade-list"></div>
     </main>
-  </div>
-
-  <!-- Idol draft modal (shown at run start / after macro-reset) -->
-  <div id="draft" class="modal hidden">
-    <div class="modal-card">
-      <h2>Choose an Idol</h2>
-      <p class="muted">Pick 1 of 3. Its bonus lasts the entire run, until your next macro-reset.</p>
-      <div class="draft-choices" id="draftChoices"></div>
-    </div>
   </div>
 
   <!-- Menu / settings sheet -->

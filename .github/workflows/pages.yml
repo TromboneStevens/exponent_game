@@ -35,9 +35,11 @@ jobs:
       - name: Assemble static site
         # Copy only the files the browser game needs into _site/, leaving the
         # Node simulator (sim/) and dev files out of the published artifact.
+        # combat.js is the module the combat UI loads; economy.js is kept too
+        # (unused by the UI for now, harmless, slated for a later prestige layer).
         run: |
           mkdir -p _site
-          cp index.html styles.css economy.js game.js _site/
+          cp index.html styles.css combat.js economy.js game.js _site/
 
       - name: Upload site
         uses: actions/upload-pages-artifact@v3
