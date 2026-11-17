@@ -2,38 +2,43 @@
 /* Quantum Forge balance simulator — CLI.
  *
  * Runs headless simulations of the game (sharing ../economy.js) to measure how
- * long goals take, compare player strategies, and sweep balance parameters.
- * Outputs a console summary plus optional CSV/JSON files for analysis.
+ * long goals take, compare player strategies and idol builds, sweep balance
+ * parameters, and study the meta-progression loop. Outputs a console summary
+ * plus optional CSV/JSON files.
  *
  * Usage:
  *   node sim/run.js <scenario> [options]
  *
  * Scenarios:
- *   single     One strategy, milestone ladder + full time series.   (default)
+ *   single     One strategy: milestone ladder + full time series.   (default)
  *   compare    Several strategies side-by-side on the same goals.
+ *   builds     Compare idol-build archetypes over a meta-run.
  *   sweep      Vary one CONFIG value; measure time-to-goal for each.
- *   prestige   Long run with auto-prestige; study the meta layer.
+ *   metarun    Long multi-macro-reset run; study meta-progression.
  *
  * Common options:
- *   --strategy=<name>        idle | greedy-cheapest | best-roi | patient-roi | prestige-roi
- *   --strategies=a,b,c       (compare) list of strategies
- *   --duration=<spec>        game time to simulate, e.g. 1h, 3d, 90m, 3600 (seconds)
- *   --step=<seconds>         time per step (bigger = faster/coarser). default 1
- *   --taps=<n>               simulated taps/sec (default 0 = pure idle)
- *   --out=<dir>             write CSV/JSON output here (default: sim/out)
- *   --no-files              console only, skip writing files
- *   --json                  also print raw JSON to stdout
+ *   --strategy=<name>     idle-only | cheapest | best-roi | meta-runner |
+ *                         build-production | build-compound | build-thrift | build-points
+ *   --strategies=a,b,c    (compare/builds) list of strategies
+ *   --duration=<spec>     game time: 3600, 90m, 6h, 3d
+ *   --step=<seconds>      sim step size (bigger = faster/coarser). default 1
+ *   --seed=<n>            PRNG seed for idol drafts (reproducible). default 1
+ *   --out=<dir>           output dir. default sim/out
+ *   --no-files            console only
+ *   --json                also print raw JSON
  *
  * Sweep options:
- *   --key=<CONFIG field>     e.g. prestigeExponent, corePerCoreBonus
- *   --values=a,b,c           values to try (numbers or strings)
- *   --goal-metric=<metric>   energy|totalEarned|perSec|cores (default totalEarned)
- *   --goal-value=<number>    e.g. 1e12
+ *   --key=<CONFIG field>  e.g. pDepthMul, pointsBase, pDepthBase
+ *   --values=a,b,c        values to try
+ *   --goal-metric=<m>     energy|totalEarned|perSec|depth|prestigeLevel|points|lifetimePoints|macroResets
+ *   --goal-value=<n>      e.g. 10
  *
  * Examples:
  *   node sim/run.js compare --duration=1d
- *   node sim/run.js single --strategy=best-roi --duration=6h --taps=4
- *   node sim/run.js sweep --key=prestigeExponent --values=0.3,0.4,0.5 --goal-value=1e9 --goal-metric=cores
+ *   node sim/run.js builds --duration=1d
+ *   node sim/run.js single --strategy=meta-runner --duration=6h
+ *   node sim/run.js sweep --key=pDepthMul --values=8,10,12 --goal-metric=prestigeLevel --goal-value=10
+ *   node sim/run.js metarun --duration=3d
  */
 
 "use strict";
@@ -49,18 +54,14 @@ function parseArgs(argv) {
       const eq = a.indexOf("=");
       if (eq === -1) args[a.slice(2)] = true;
       else args[a.slice(2, eq)] = a.slice(eq + 1);
-    } else {
-      args._.push(a);
-    }
+    } else args._.push(a);
   }
   return args;
 }
 
-// Parse a duration spec like "90", "3600s", "90m", "6h", "3d".
 function parseDuration(spec, dflt) {
   if (spec == null) return dflt;
-  const s = String(spec).trim();
-  const m = s.match(/^([0-9.]+)\s*([smhd]?)$/i);
+  const m = String(spec).trim().match(/^([0-9.]+)\s*([smhd]?)$/i);
   if (!m) return dflt;
   const n = parseFloat(m[1]);
   switch ((m[2] || "s").toLowerCase()) {
@@ -77,11 +78,9 @@ function parseList(v) {
   return String(v).split(",").map((x) => x.trim()).filter(Boolean);
 }
 
-// CONFIG values may be numbers or numeric strings (e.g. "1e9"). Keep strings
-// that look like big-number exponentials; coerce plain decimals to Number.
 function coerceValue(v) {
   const s = String(v);
-  if (/e/i.test(s)) return s; // keep "1e9" as a string for Decimal
+  if (/e/i.test(s)) return s; // keep "1e9" string for Decimal
   const n = Number(s);
   return Number.isNaN(n) ? s : n;
 }
@@ -91,32 +90,31 @@ function main() {
   const scenario = args._[0] || "single";
   const duration = parseDuration(args.duration, 86400);
   const step = args.step != null ? Number(args.step) : 1;
-  const taps = args.taps != null ? Number(args.taps) : 0;
+  const seed = args.seed != null ? Number(args.seed) : 1;
   const writeFiles = !args["no-files"];
   const outDir = args.out || path.join(__dirname, "out");
-
-  const common = { durationSeconds: duration, stepSeconds: step, tapsPerSecond: taps };
+  const common = { durationSeconds: duration, stepSeconds: step, seed };
 
   let bundle;
   try {
     if (scenario === "single" || scenario === "milestones") {
-      bundle = scenarios.milestones(Object.assign({ strategy: args.strategy || "best-roi" }, common));
+      bundle = scenarios.milestones(Object.assign({ strategy: args.strategy || "meta-runner" }, common));
     } else if (scenario === "compare") {
       bundle = scenarios.compare(Object.assign({ strategies: parseList(args.strategies) }, common));
+    } else if (scenario === "builds") {
+      bundle = scenarios.builds(Object.assign({ strategies: parseList(args.strategies) }, common));
     } else if (scenario === "sweep") {
       const values = (parseList(args.values) || []).map(coerceValue);
       bundle = scenarios.sweep(Object.assign({
-        key: args.key,
-        values,
-        strategy: args.strategy || "best-roi",
-        goalLabel: args["goal-label"] || args.key,
-        metric: args["goal-metric"] || "totalEarned",
-        value: args["goal-value"] || "1e12",
+        key: args.key, values,
+        strategy: args.strategy || "meta-runner",
+        metric: args["goal-metric"] || "prestigeLevel",
+        value: args["goal-value"] || "10",
       }, common));
-    } else if (scenario === "prestige") {
-      bundle = scenarios.prestige(common);
+    } else if (scenario === "metarun") {
+      bundle = scenarios.metarun(Object.assign({ strategy: args.strategy || "meta-runner" }, common));
     } else {
-      console.error(`Unknown scenario "${scenario}". Try: single | compare | sweep | prestige`);
+      console.error(`Unknown scenario "${scenario}". Try: single | compare | builds | sweep | metarun`);
       process.exit(1);
     }
   } catch (e) {
@@ -130,28 +128,23 @@ function main() {
     const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
     const prefix = path.join(outDir, `${scenario}-${stamp}`);
     const written = [];
-
-    // Time series CSV for single/prestige (one run). For compare/sweep, write each.
-    bundle.results.forEach((r, i) => {
+    bundle.results.forEach((r) => {
       const tag = bundle.results.length > 1 ? `-${sanitize(r.meta.strategy)}` : "";
       written.push(report.write(`${prefix}${tag}.series.csv`, report.seriesToCsv(r)));
     });
     written.push(report.write(`${prefix}.milestones.csv`, report.milestonesToCsv(bundle.results)));
     written.push(report.write(`${prefix}.json`, JSON.stringify(bundle, null, 2)));
-
     console.log("\nWrote:");
     for (const w of written) console.log("  " + path.relative(process.cwd(), w));
   }
 
-  if (args.json) {
-    console.log("\n" + JSON.stringify(bundle, null, 2));
-  }
+  if (args.json) console.log("\n" + JSON.stringify(bundle, null, 2));
 }
 
 function printReport(scenario, bundle) {
   console.log("=".repeat(64));
   if (bundle.kind === "compare") {
-    console.log("STRATEGY COMPARISON — time to reach each milestone\n");
+    console.log("STRATEGY / BUILD COMPARISON — time to reach each milestone\n");
     console.log(report.comparisonTable(bundle.results));
   } else if (bundle.kind === "sweep") {
     const { key, goal, rows } = bundle.extra;
@@ -159,22 +152,14 @@ function printReport(scenario, bundle) {
     const w = Math.max(key.length, ...rows.map((r) => String(r.value).length)) + 2;
     console.log(pad(key, w) + " | time-to-goal");
     console.log("-".repeat(w + 16));
-    for (const r of rows) {
-      console.log(pad(String(r.value), w) + " | " + (r.reached ? report.fmtTime(r.timeSeconds) : "not reached"));
-    }
+    for (const r of rows) console.log(pad(String(r.value), w) + " | " + (r.reached ? report.fmtTime(r.timeSeconds) : "not reached"));
   } else {
     console.log(report.summaryText(bundle.results[0]));
   }
   console.log("=".repeat(64));
 }
 
-function pad(s, n) {
-  s = String(s);
-  return s.length >= n ? s : s + " ".repeat(n - s.length);
-}
-
-function sanitize(s) {
-  return String(s).replace(/[^a-z0-9._-]+/gi, "_");
-}
+function pad(s, n) { s = String(s); return s.length >= n ? s : s + " ".repeat(n - s.length); }
+function sanitize(s) { return String(s).replace(/[^a-z0-9._-]+/gi, "_"); }
 
 main();

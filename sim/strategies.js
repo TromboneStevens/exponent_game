@@ -1,127 +1,134 @@
 /* Automated "player" strategies for the simulator.
  *
- * A strategy decides what to buy on each simulation step. Each strategy is an
- * object with:
- *   name            string label
- *   decide(ctx)     mutate ctx.state via ctx.E.buy*; return true if it bought
- *                   anything (so the engine recomputes). May loop to spend down.
- *   shouldPrestige? (ctx) => boolean   optional, only used when autoPrestige on
- *   onPrestige?     (ctx, gained)      optional hook after a collapse
+ * A strategy plays the idle + idols + meta-progression game. It can implement:
+ *   name                 string label
+ *   decide(ctx)          spend ENERGY on generators/upgrades; return true if it bought
+ *   spendMeta(ctx)?      spend PRESTIGE POINTS in the meta-shop; return true if it bought
+ *   shouldMacroReset(ctx)? => boolean  when to collapse the run
+ *   pickIdol({choices,...})? => idolId  which of the 3 drafted idols to take
  *
- * ctx provides: E (economy module), D, config, state, derived, t (seconds),
- * genCost(id), recompute().
- *
- * Strategies spend greedily within a step but re-check affordability after each
- * purchase, mirroring how a real player clicks repeatedly.
+ * ctx: { E, D, config, run, meta, derived, t, genCost(id), upgradeCost(id),
+ *        depth(), prestigeLevel(), pointsOnReset(), recompute() }
  */
 
 "use strict";
 
-// Return the per-unit production a generator currently yields (after mults).
+/* ---------- Generator / upgrade spending helpers ---------- */
+
 function perUnitProd(ctx, id) {
-  return ctx.derived.genProd[id] || ctx.E.D(ctx.E.genDef(id).baseProd).mul(ctx.derived.coreMult);
+  return ctx.derived.genProd[id] || ctx.E.D(ctx.E.genDef(id).baseProd);
 }
 
-// Payback time (seconds) to recoup a generator's next-unit cost from its added
-// production. Lower is better. Returns Infinity if it produces nothing.
+// Payback time (s) for the next unit of a generator. Lower is better.
 function paybackSeconds(ctx, id) {
   const prod = perUnitProd(ctx, id);
   if (prod.lte(0)) return Infinity;
-  const cost = ctx.genCost(id);
-  return cost.div(prod).toNumber();
+  return ctx.genCost(id).div(prod).toNumber();
 }
 
-/* ---------- Generator-buying helpers ---------- */
-
-// Buy every generator we can afford, cheapest first, until nothing is affordable.
-function spendGreedyCheapest(ctx) {
-  let bought = false;
-  let guard = 100000; // safety against pathological configs
-  while (guard-- > 0) {
-    let best = null;
-    let bestCost = null;
-    for (const g of ctx.E.GENERATORS) {
-      const cost = ctx.genCost(g.id);
-      if (ctx.state.energy.gte(cost) && (bestCost === null || cost.lt(bestCost))) {
-        best = g.id;
-        bestCost = cost;
-      }
-    }
-    if (!best) break;
-    if (!ctx.E.buyGenerator(ctx.state, best)) break;
-    bought = true;
-    ctx.recompute();
-  }
-  return bought;
-}
-
-// Buy the generator with the best (lowest) payback time, repeatedly.
-function spendBestRoi(ctx) {
-  let bought = false;
-  let guard = 100000;
-  while (guard-- > 0) {
-    let best = null;
-    let bestPb = Infinity;
-    for (const g of ctx.E.GENERATORS) {
-      const cost = ctx.genCost(g.id);
-      if (!ctx.state.energy.gte(cost)) continue;
-      const pb = paybackSeconds(ctx, g.id);
-      if (pb < bestPb) {
-        bestPb = pb;
-        best = g.id;
-      }
-    }
-    if (!best) break;
-    if (!ctx.E.buyGenerator(ctx.state, best)) break;
-    bought = true;
-    ctx.recompute();
-  }
-  return bought;
-}
-
-// Buy all affordable upgrades (always good value in this prototype's design).
 function spendUpgrades(ctx) {
   let bought = false;
   for (const u of ctx.E.UPGRADES) {
-    if (ctx.state.upgrades[u.id]) continue;
-    if (ctx.E.buyUpgrade(ctx.state, u.id)) {
-      bought = true;
-      ctx.recompute();
-    }
+    if (ctx.run.upgrades[u.id]) continue;
+    if (ctx.E.buyUpgrade(ctx.run, ctx.meta, u.id)) { bought = true; ctx.recompute(); }
   }
   return bought;
 }
 
-/* ---------- Prestige policies ---------- */
+function spendBestRoi(ctx) {
+  let bought = false;
+  let guard = 200000;
+  while (guard-- > 0) {
+    let best = null, bestPb = Infinity;
+    for (const g of ctx.E.GENERATORS) {
+      if (!ctx.run.energy.gte(ctx.genCost(g.id))) continue;
+      const pb = paybackSeconds(ctx, g.id);
+      if (pb < bestPb) { bestPb = pb; best = g.id; }
+    }
+    if (!best) break;
+    if (!ctx.E.buyGenerator(ctx.run, ctx.meta, best)) break;
+    bought = true;
+    ctx.recompute();
+  }
+  return bought;
+}
 
-// Prestige when the pending gain would multiply current cores by >= factor,
-// i.e. a meaningful jump, and at least `minGain` cores are available.
-function makePrestigePolicy(factor, minGain) {
-  return function shouldPrestige(ctx) {
-    const gain = ctx.E.prestigeGain(ctx.state, ctx.config);
-    if (gain.lt(minGain)) return false;
-    // If we have no cores yet, prestige as soon as gain >= minGain.
-    if (ctx.state.cores.lte(0)) return true;
-    return gain.gte(ctx.state.cores.mul(factor));
+function spendCheapest(ctx) {
+  let bought = false;
+  let guard = 200000;
+  while (guard-- > 0) {
+    let best = null, bestCost = null;
+    for (const g of ctx.E.GENERATORS) {
+      const cost = ctx.genCost(g.id);
+      if (ctx.run.energy.gte(cost) && (bestCost === null || cost.lt(bestCost))) { best = g.id; bestCost = cost; }
+    }
+    if (!best) break;
+    if (!ctx.E.buyGenerator(ctx.run, ctx.meta, best)) break;
+    bought = true;
+    ctx.recompute();
+  }
+  return bought;
+}
+
+/* ---------- Meta-shop spending ---------- */
+
+// Buy any affordable meta upgrade, cheapest-first, leaving nothing on the table.
+function spendMetaGreedy(ctx) {
+  let bought = false;
+  let guard = 100000;
+  while (guard-- > 0) {
+    let best = null, bestCost = null;
+    for (const m of ctx.E.META_UPGRADES) {
+      const lvl = ctx.meta.metaLevels[m.id] || 0;
+      if (lvl >= m.max) continue;
+      const cost = ctx.E.metaCost(m, lvl);
+      if (ctx.meta.points.gte(cost) && (bestCost === null || cost.lt(bestCost))) { best = m.id; bestCost = cost; }
+    }
+    if (!best) break;
+    if (!ctx.E.buyMeta(ctx.meta, best)) break;
+    bought = true;
+  }
+  return bought;
+}
+
+/* ---------- Macro-reset policies ---------- */
+
+// Reset once the run has PLATEAUED at a meaningful depth: the player has pushed
+// past `minDepth` P-levels and then gone `stallSeconds` without clearing a new
+// level (production can no longer keep pace with exponential costs). Resetting
+// below minDepth is pointless churn, so the policy refuses to.
+function makeStallReset(stallSeconds, minDepth) {
+  let lastLevel = -1;
+  let lastGainTime = 0;
+  let started = false;
+  return function shouldMacroReset(ctx) {
+    const lvl = ctx.prestigeLevel();
+    if (!started) { lastLevel = lvl; lastGainTime = ctx.t; started = true; }
+    if (lvl > lastLevel) { lastLevel = lvl; lastGainTime = ctx.t; }
+    if (ctx.depth() < minDepth) return false; // haven't earned a worthwhile run yet
+    const stalled = ctx.t - lastGainTime >= stallSeconds;
+    return stalled && ctx.pointsOnReset().gt(0);
+  };
+}
+
+/* ---------- Idol-pick policies (define "builds") ---------- */
+
+// Prefer idols whose first modifier matches one of `preferTypes`, in order.
+function makeIdolPicker(preferTypes) {
+  return function pickIdol({ choices }) {
+    for (const type of preferTypes) {
+      const match = choices.find((c) => c.mods.some((m) => m.type === type));
+      if (match) return match.id;
+    }
+    return choices[0].id;
   };
 }
 
 /* ---------- Exported strategies ---------- */
 
-const idle = {
-  name: "idle",
-  // Pure idle: never buys. Baseline for "do nothing" curves.
-  decide() { return false; },
-};
-
-const greedyCheapest = {
-  name: "greedy-cheapest",
-  decide(ctx) {
-    // Upgrades first (they're flat-cost and compounding), then cheapest gens.
-    const a = spendUpgrades(ctx);
-    const b = spendGreedyCheapest(ctx);
-    return a || b;
-  },
+const idleOnly = {
+  name: "idle-only",
+  decide() { return false; }, // buys nothing; pure baseline
 };
 
 const bestRoi = {
@@ -131,67 +138,55 @@ const bestRoi = {
     const b = spendBestRoi(ctx);
     return a || b;
   },
+  spendMeta: spendMetaGreedy,
 };
 
-// Like best-ROI but keeps a cash buffer, only spending when it can afford the
-// best-ROI pick without dropping below a fraction of income (less twitchy).
-const patientRoi = {
-  name: "patient-roi",
+const cheapest = {
+  name: "cheapest",
   decide(ctx) {
-    spendUpgrades(ctx);
-    // Only buy if the cheapest ROI pick costs <= all current energy minus 2s income.
-    const buffer = ctx.derived.perSec.mul(2);
-    let bought = false;
-    let guard = 100000;
-    while (guard-- > 0) {
-      let best = null, bestPb = Infinity, bestCost = null;
-      for (const g of ctx.E.GENERATORS) {
-        const cost = ctx.genCost(g.id);
-        if (!ctx.state.energy.sub(buffer).gte(cost)) continue;
-        const pb = paybackSeconds(ctx, g.id);
-        if (pb < bestPb) { bestPb = pb; best = g.id; bestCost = cost; }
-      }
-      if (!best) break;
-      if (!ctx.E.buyGenerator(ctx.state, best)) break;
-      bought = true;
-      ctx.recompute();
-    }
-    return bought;
+    const a = spendUpgrades(ctx);
+    const b = spendCheapest(ctx);
+    return a || b;
   },
+  spendMeta: spendMetaGreedy,
 };
 
-// Prestige-focused: best-ROI play plus an automatic collapse policy.
-const prestigeRoi = {
-  name: "prestige-roi",
+// A full meta-run player: best-ROI economy, greedy meta-shop, stall-based
+// macro-resets, and a production-leaning idol build.
+const metaRunner = {
+  name: "meta-runner",
   decide(ctx) {
     const a = spendUpgrades(ctx);
     const b = spendBestRoi(ctx);
     return a || b;
   },
-  shouldPrestige: makePrestigePolicy(2, 1), // collapse when gain >= 2x current cores
+  spendMeta: spendMetaGreedy,
+  // Only collapse after plateauing past P5 with no new level for 60s.
+  shouldMacroReset: makeStallReset(60, 5),
+  pickIdol: makeIdolPicker(["allMul", "prodExp", "genMul"]),
 };
 
-const ALL = { idle, greedyCheapest, bestRoi, patientRoi, prestigeRoi };
+// Build archetypes — same play, different idol preference, for build comparison.
+const buildProduction = Object.assign({}, metaRunner, { name: "build-production", pickIdol: makeIdolPicker(["allMul", "genMul", "prodExp"]) });
+const buildCompound   = Object.assign({}, metaRunner, { name: "build-compound",   pickIdol: makeIdolPicker(["prodExp", "allMul"]) });
+const buildThrift     = Object.assign({}, metaRunner, { name: "build-thrift",     pickIdol: makeIdolPicker(["costMul", "allMul"]) });
+const buildPoints     = Object.assign({}, metaRunner, { name: "build-points",     pickIdol: makeIdolPicker(["pointsMul", "depthMul", "allMul"]) });
 
-// Resolve a strategy by its CLI-friendly name (kebab or camel).
+const ALL = {
+  idleOnly, bestRoi, cheapest, metaRunner,
+  buildProduction, buildCompound, buildThrift, buildPoints,
+};
+
 function byName(name) {
   if (!name) return null;
-  const direct = ALL[name];
-  if (direct) return direct;
-  for (const s of Object.values(ALL)) {
-    if (s.name === name) return s;
-  }
+  if (ALL[name]) return ALL[name];
+  for (const s of Object.values(ALL)) if (s.name === name) return s;
   return null;
 }
 
 module.exports = {
-  idle,
-  greedyCheapest,
-  bestRoi,
-  patientRoi,
-  prestigeRoi,
+  ...ALL,
   ALL,
   byName,
-  // exported for custom scenarios/tests
-  helpers: { perUnitProd, paybackSeconds, spendGreedyCheapest, spendBestRoi, spendUpgrades, makePrestigePolicy },
+  helpers: { perUnitProd, paybackSeconds, spendUpgrades, spendBestRoi, spendCheapest, spendMetaGreedy, makeStallReset, makeIdolPicker },
 };

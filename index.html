@@ -29,18 +29,25 @@
       </div>
       <div class="rate" id="energyRate">0 / sec</div>
 
-      <button id="tapBtn" class="tap-btn">
-        <span class="tap-core">TAP</span>
-        <span class="tap-sub" id="tapGain">+1</span>
-      </button>
+      <!-- Prestige depth: continuous P-level progress -->
+      <div class="depth">
+        <div class="depth-head">
+          <span class="depth-level" id="depthLevel">P0</span>
+          <span class="depth-next" id="depthNext"></span>
+        </div>
+        <div class="depth-bar"><div class="depth-fill" id="depthFill"></div></div>
+      </div>
+
+      <!-- Active idols for this run -->
+      <div class="idol-strip" id="idolStrip"></div>
 
       <div class="prestige-strip">
         <div class="prestige-info">
-          <span class="chip">✦ <b id="coresValue">0</b> Cores</span>
-          <span class="chip">×<b id="multValue">1.00</b> boost</span>
+          <span class="chip">◈ <b id="pointsValue">0</b> Points</span>
+          <span class="chip">⟳ <b id="resetCount">0</b> resets</span>
         </div>
-        <button id="prestigeBtn" class="prestige-btn" disabled>
-          Collapse for <b id="prestigeGain">0</b> ✦
+        <button id="macroBtn" class="prestige-btn" disabled>
+          Macro-Reset for <b id="pointsGain">0</b> ◈
         </button>
       </div>
     </section>
@@ -48,12 +55,23 @@
     <nav class="tabs">
       <button class="tab active" data-tab="generators">Generators</button>
       <button class="tab" data-tab="upgrades">Upgrades</button>
+      <button class="tab" data-tab="meta">Meta ◈</button>
     </nav>
 
     <main class="panel">
       <div id="tab-generators" class="tab-content active"></div>
       <div id="tab-upgrades" class="tab-content"></div>
+      <div id="tab-meta" class="tab-content"></div>
     </main>
+  </div>
+
+  <!-- Idol draft modal (shown at run start / after macro-reset) -->
+  <div id="draft" class="modal hidden">
+    <div class="modal-card">
+      <h2>Choose an Idol</h2>
+      <p class="muted">Pick 1 of 3. Its bonus lasts the entire run, until your next macro-reset.</p>
+      <div class="draft-choices" id="draftChoices"></div>
+    </div>
   </div>
 
   <!-- Menu / settings sheet -->

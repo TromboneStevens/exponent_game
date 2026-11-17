@@ -83,22 +83,44 @@ html, body {
 .currency-label { color: var(--muted); font-size: 13px; margin-top: 2px; }
 .rate { color: var(--accent-2); font-weight: 600; font-size: 14px; margin-top: 6px; }
 
-.tap-btn {
-  margin: 16px auto 4px;
-  display: block;
-  width: 160px; height: 160px;
-  border-radius: 50%;
-  border: none;
-  color: #071126;
-  background:
-    radial-gradient(circle at 30% 25%, #baf0ff 0%, var(--accent-2) 40%, var(--accent) 100%);
-  box-shadow: 0 0 0 6px rgba(91,140,255,0.15), 0 14px 30px rgba(56,232,198,0.35);
-  position: relative;
-  transition: transform 0.06s ease;
+/* Prestige depth bar */
+.depth { margin: 16px 2px 4px; }
+.depth-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
+.depth-level { font-weight: 800; font-size: 18px; color: var(--gold); }
+.depth-next { font-size: 12px; color: var(--muted); }
+.depth-bar {
+  height: 10px;
+  background: var(--card-2);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  overflow: hidden;
 }
-.tap-btn:active { transform: scale(0.94); }
-.tap-core { display: block; font-size: 30px; font-weight: 900; letter-spacing: 2px; }
-.tap-sub { display: block; font-size: 14px; font-weight: 700; opacity: 0.8; }
+.depth-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--accent-2), var(--gold));
+  transition: width 0.2s ease;
+}
+
+/* Active idol strip */
+.idol-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: center;
+  margin: 12px 0 2px;
+  min-height: 4px;
+}
+.idol-tag {
+  background: linear-gradient(90deg, #4a2d7a, #6b3fb0);
+  border: 1px solid #8b5cff;
+  color: #f0e6ff;
+  border-radius: 999px;
+  padding: 4px 11px;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.idol-tag.rare { background: linear-gradient(90deg, #7a5a1e, #b0862f); border-color: var(--gold); color: #fff6df; }
 
 /* Prestige strip */
 .prestige-strip {
@@ -230,6 +252,46 @@ html, body {
 .btn.danger { color: var(--danger); border-color: var(--danger); }
 .muted { color: var(--muted); font-size: 13px; }
 .muted.small { font-size: 11px; margin-top: 12px; }
+
+/* Modal (idol draft) */
+.modal {
+  position: fixed; inset: 0;
+  background: rgba(4,7,15,0.85);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 70;
+  padding: 16px;
+}
+.modal.hidden { display: none; }
+.modal-card {
+  width: 100%;
+  max-width: 460px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 20px 16px;
+}
+.modal-card h2 { margin: 0 0 6px; text-align: center; }
+.modal-card .muted { text-align: center; margin: 0 0 14px; }
+.draft-choices { display: flex; flex-direction: column; gap: 10px; }
+.idol-choice {
+  text-align: left;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 14px;
+  color: var(--txt);
+  transition: transform 0.06s, border-color 0.15s;
+}
+.idol-choice:active { transform: scale(0.98); }
+.idol-choice.rare { border-color: var(--gold); }
+.idol-choice .ic-name { font-weight: 800; font-size: 15px; display: flex; justify-content: space-between; align-items: center; }
+.idol-choice .ic-rarity { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); }
+.idol-choice.rare .ic-rarity { color: var(--gold); }
+.idol-choice .ic-desc { color: var(--accent-2); font-size: 13px; margin-top: 4px; }
+
+/* Meta-shop item level pips */
+.item-level { color: var(--gold); font-size: 12px; margin-top: 4px; }
+.buy-btn.maxed { background: var(--card-2); color: var(--gold); border: 1px solid var(--gold); }
 
 /* Toast */
 .toast {
