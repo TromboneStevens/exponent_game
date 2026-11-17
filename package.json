@@ -1,8 +1,0 @@
-{
-  "name": "exponent_game",
-  "version": "1.0.0",
-  "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build"
-  }
-}
