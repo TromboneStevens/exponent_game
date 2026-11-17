@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<meta name="theme-color" content="#0b0f1a" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<title>Quantum Forge — Idle</title>
+<!-- break_infinity.js: fast large-number math for incremental games -->
+<script src="https://cdn.jsdelivr.net/npm/break_infinity.js@2"></script>
+<link rel="stylesheet" href="styles.css" />
+<!-- Shared economy module: must load before game.js (the UI layer) -->
+<script src="economy.js"></script>
+</head>
+<body>
+  <div id="app">
+    <header class="topbar">
+      <div class="brand">
+        <span class="logo">⚛</span>
+        <span class="title">Quantum Forge</span>
+      </div>
+      <button id="menuBtn" class="icon-btn" aria-label="Menu">☰</button>
+    </header>
+
+    <section class="hero">
+      <div class="currency">
+        <div class="currency-value" id="energyValue">0</div>
+        <div class="currency-label">Quantum Energy</div>
+      </div>
+      <div class="rate" id="energyRate">0 / sec</div>
+
+      <button id="tapBtn" class="tap-btn">
+        <span class="tap-core">TAP</span>
+        <span class="tap-sub" id="tapGain">+1</span>
+      </button>
+
+      <div class="prestige-strip">
+        <div class="prestige-info">
+          <span class="chip">✦ <b id="coresValue">0</b> Cores</span>
+          <span class="chip">×<b id="multValue">1.00</b> boost</span>
+        </div>
+        <button id="prestigeBtn" class="prestige-btn" disabled>
+          Collapse for <b id="prestigeGain">0</b> ✦
+        </button>
+      </div>
+    </section>
+
+    <nav class="tabs">
+      <button class="tab active" data-tab="generators">Generators</button>
+      <button class="tab" data-tab="upgrades">Upgrades</button>
+    </nav>
+
+    <main class="panel">
+      <div id="tab-generators" class="tab-content active"></div>
+      <div id="tab-upgrades" class="tab-content"></div>
+    </main>
+  </div>
+
+  <!-- Menu / settings sheet -->
+  <div id="sheet" class="sheet hidden">
+    <div class="sheet-card">
+      <h2>Menu</h2>
+      <p class="muted" id="offlineNote"></p>
+      <div class="sheet-actions">
+        <button id="saveBtn" class="btn">Save</button>
+        <button id="exportBtn" class="btn">Export save</button>
+        <button id="importBtn" class="btn">Import save</button>
+        <button id="hardResetBtn" class="btn danger">Hard reset</button>
+        <button id="closeSheet" class="btn ghost">Close</button>
+      </div>
+      <p class="muted small">Prototype build. Autosaves every 15s and on exit.</p>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="game.js"></script>
+</body>
+</html>
