@@ -116,12 +116,16 @@ becomes **how far you've fought**.
 - **OQ-2 (currency model): DECIDED → gold.** Monsters drop **gold**; gold buys
   DPS/economy upgrades (true Tap-Titans model). This supersedes the energy model
   for the combat layer. See §5.1.1.
-- **OQ-3 (boss = what?):** a HP pool you must burn down within a **time limit**
-  (DPS × time ≥ bossHP), fail → keep grinding normals, retry on demand. Leaning
-  timer-based (that's the actual challenge).
-- **OQ-4 (manual gate):** bosses become **manual gates** — normal-monster
-  progress **caps just below** the next boss until you beat it via a button.
-  This is the main behavioral change vs. today's auto-advancing depth.
+- **OQ-3 (boss = what?): DECIDED → pure DPS check, no timer.** A boss is a large
+  fixed-HP wall. No fail state and no clock: you *can* always grind it down, but
+  under-powered it takes an absurd amount of time, so in practice you farm
+  upgrades until your DPS clears it quickly. Built in `combat.js` (`attemptBoss`,
+  `bossDpsCheck`).
+- **OQ-4 (enemy cap): DECIDED → capped normals, manual boss attempt.** Normal
+  enemy HP and *base* gold scale per kill but **cap** (`hpCapKill`/`goldCapKill`);
+  past the cap every normal is identical, so grinding yields flat income — a
+  deliberate plateau. (The player's gold-drop upgrade still scales gold.) Normals
+  auto-loop; the boss is entered only when the player chooses to attempt it.
 
 ### 5.1.1 Stage-1 combat loop (Green Meadows) — `planned`
 
@@ -183,30 +187,39 @@ Tuned with `node sim/run.js combat` (see §8). **First-pass defaults** now in
   ×1.4, critDmg ×1.35) so spend keeps pace with exponential HP.
 - `baseHP 4`, `hpGrowth 1.12`; `baseGold 4`, `goldGrowth 1.14`.
 
+Now also models the boss/cap decisions (OQ-3/OQ-4): `stageKills 40`, HP/gold cap
+at kill 40, boss HP = capped-stage-end HP × 25 (DPS-check ≈ 465 at Stage 1).
+
 **Findings:**
 - **Starting feel is right:** 1st goblin dies in **4s**, kill 5 ~20s, kill 10
-  ~47s — snappy early game matching the "4–5 hits" target.
-- **`hpGrowth` vs `goldGrowth` is THE knob.** When `hpGrowth > goldGrowth` the
-  stage hard-walls (income can't fund the next kill); the *gap* sets how
-  gradually it slows. Sweep (best-dps-per-gold, 30m): hp 1.12→79 kills, 1.13→69,
-  1.14→63, 1.15→59. Picked **1.12** (just under gold's 1.14) for a long, gradual
-  wall rather than a cliff.
-- **No single-stat dominance.** Over 1h: atk-only 69 kills < round-robin 89 ≈
-  best-dps-per-gold 89 — pouring everything into damage *under*performs spreading
-  across the 5 tracks, so the upgrades genuinely complement each other.
-- **`no-buy` walls at ~38 kills** — doing nothing progresses a little then stalls,
-  confirming buying matters without instantly punishing idle.
-- **Soft wall ~kill 50–89 in an hour** — a natural "time to get stronger / prestige"
-  pressure point for the stage to hand off. Good.
+  ~31s — snappy early game matching the "4–5 hits" target.
+- **`hpGrowth` vs `goldGrowth` is THE pre-cap knob.** The gap sets how fast DPS
+  climbs vs enemies before the cap. Picked `hpGrowth 1.12` under `goldGrowth 1.14`.
+- **The cap (OQ-4) creates the intended plateau.** Past kill 40, normals are flat,
+  so DPS snowballs on fixed targets — you farm gold at a steady rate to push DPS
+  toward the boss wall.
+- **Boss is a real but fair wall.** `best-dps-per-gold` farms ~100 normals (~3–4
+  min) to reach the ~465 DPS check, then clears Stage 1. Clearing is gated on
+  *build quality*, not raw time.
+- **No single-stat dominance — and it gates the boss.** `atk-only` farms 400+
+  normals but its DPS (~81) never approaches the boss check, so it **cannot clear
+  the boss**. Spreading across the 5 tracks (crit, speed, gold) is required to
+  cross the DPS check — the upgrades genuinely complement each other.
+- **`no-buy` never threatens the boss** (DPS 1, ~35 kills). Buying matters.
+
+**Not yet modeled — per-stage escalation (OQ-8).** The sim currently tunes ONE
+stage; `combat.js` can advance stages but every stage reuses Stage 1's curve, so
+later bosses aren't tougher yet. Multi-stage scaling (each stage ramps baseHP/
+gold) is the next combat task. The combat sim defaults to `stopAtStage: 1`.
 
 **Bug caught by the sim (now fixed):** multiplicative stats (`goldMult`,
 `critMult`) were plain-float `Math.pow`, so after thousands of levels `goldMult`
 overflowed to `Infinity` — the exact failure `break_infinity.js` exists to
 prevent. Unbounded stats are now `Decimal`. Regression-tested in `sim/test.js`.
 
-**Still open:** OQ-10 (speed cap overflow value), OQ-11 (crit-chance cap — set to
-60% for now), OQ-12 (does gold feed depth?). Boss timed-fights (OQ-3/4) not yet
-modeled in the combat sim.
+**Still open:** OQ-8 (per-stage escalation — next combat task), OQ-10 (speed cap
+overflow value), OQ-11 (crit-chance cap — set to 60% for now), OQ-12 (does gold
+feed depth?).
 
 ### 5.2 Idols (per-run roguelike draft) — `live`
 
@@ -340,8 +353,11 @@ piece of net-new work on the table. Prototype it small first.
   Decision for now: **chained** (layered by default). Parallel = `parked`.
 - **OQ-2 — Combat currency model: DECIDED → gold drop** (Tap-Titans model). Built
   in `combat.js` / `sim/combat.js`.
-- **OQ-3 — Boss mechanic:** timed HP burn vs. instant DPS check. *(Not yet modeled.)*
-- **OQ-4 — Boss gating:** do normals cap just below the next boss (manual gate)?
+- **OQ-3 — Boss mechanic: DECIDED → pure DPS check, no timer.** Large fixed-HP
+  wall; grindable but absurdly slow when under-powered. Built in `combat.js`.
+- **OQ-4 — Boss gating: DECIDED → capped normals + manual boss attempt.** Normal
+  HP/base-gold cap (flat income plateau); boss entered only on player choice.
+  Built in `combat.js`.
 - **OQ-5 — Themes cosmetic or mechanical?** Start cosmetic; revisit.
 - **OQ-6 — Tavern relationship:** `feedback(combat, ×mult)` vs. `self-contained`?
 - **OQ-7 — How different must each layer be?** Genuinely new rules vs. reskinned

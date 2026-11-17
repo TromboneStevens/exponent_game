@@ -64,18 +64,27 @@ function goalsToCsv(results) {
 function csv(v) { const s = String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }
 function pad(s, n) { s = String(s); return s.length >= n ? s : s + " ".repeat(n - s.length); }
 
+function num(x) { return D(x).toNumber(); }
+
 function summaryText(result) {
   const m = result.meta, f = result.final;
   const lines = [];
   lines.push(`Strategy:   ${m.strategy}`);
-  lines.push(`Simulated:  ${fmtTime(m.durationSeconds)}  (step ${m.stepSeconds}s)  hpGrowth=${m.config.hpGrowth} goldGrowth=${m.config.goldGrowth}`);
-  lines.push(`Final:      ${f.kills} kills · ${fmt(f.dps)} DPS · ${fmt(f.gold)} gold banked`);
-  lines.push(`Stats:      dmg ${f.stats.attackDamage.toFixed(1)} · spd ${f.stats.attackSpeed.toFixed(2)} (eff ${f.stats.effectiveAttackSpeed.toFixed(2)}) · crit ${(f.stats.critChance * 100).toFixed(0)}%@${f.stats.critMult.toFixed(2)}x · gold ×${f.stats.goldMult.toFixed(2)}`);
+  lines.push(`Simulated:  ${fmtTime(m.durationSeconds)}  (step ${m.stepSeconds}s)  hpGrowth=${m.config.hpGrowth} goldGrowth=${m.config.goldGrowth} cap@kill${m.config.hpCapKill}`);
+  lines.push(`Result:     stage ${f.stage} · ${f.bossesCleared} boss(es) cleared · ${f.kills} kills`);
+  lines.push(`Combat:     ${fmt(f.dps)} DPS  (boss DPS-check ≈ ${fmt(f.bossDpsCheck)})  ·  ${fmt(f.gold)} gold banked`);
+  lines.push(`Stats:      dmg ${num(f.stats.attackDamage).toFixed(1)} · spd ${f.stats.attackSpeed.toFixed(2)} (eff ${f.stats.effectiveAttackSpeed.toFixed(2)}) · crit ${(f.stats.critChance * 100).toFixed(0)}%@${num(f.stats.critMult).toFixed(2)}x · gold ×${fmt(f.stats.goldMult)}`);
   lines.push(`Levels:     ${C.UPGRADES.map((u) => `${u.id}:${f.levels[u.id]}`).join("  ")}`);
   lines.push(`Worst stall: ${result.worstStall.seconds}s on a single enemy (around kill ${result.worstStall.kills})`);
   lines.push("Kill goals:");
   for (const g of result.goals) {
     lines.push(`   ${pad("kill " + g.kills, 12)} ${g.timeSeconds != null ? fmtTime(g.timeSeconds) : "not reached"}`);
+  }
+  if (result.stageGoals && result.stageGoals.some((g) => g.timeSeconds != null)) {
+    lines.push("Stage clears:");
+    for (const g of result.stageGoals) {
+      if (g.timeSeconds != null) lines.push(`   ${pad("boss " + g.stage, 12)} ${fmtTime(g.timeSeconds)}`);
+    }
   }
   return lines.join("\n");
 }

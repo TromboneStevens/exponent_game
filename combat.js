@@ -43,18 +43,23 @@
 
   // Tunable balance constants for Stage 1. The simulator overrides these.
   const CONFIG = {
-    // Enemy HP: baseHP tuned so the goblin takes ~4-5 hits at starting damage.
+    // Normal enemy HP: baseHP tuned so the first goblin takes ~4 hits.
     baseHP: "4",
-    hpGrowth: 1.12,     // HP multiplier per enemy killed (THE pacing knob).
-                        // Tuned via sim: < goldGrowth keeps you climbing; the
-                        // gap sets how gradually the stage walls. See DESIGN §5.1.2.
+    hpGrowth: 1.12,     // HP multiplier per normal kill (pacing knob)
+    hpCapKill: 40,      // OQ-4: normal HP stops scaling past this stage-local kill
+
     // Gold reward per kill.
     baseGold: "4",
-    goldGrowth: 1.14,   // gold multiplier per enemy killed
-    // Bosses: every bossInterval kills, HP x bossHpMult, with a time limit.
-    bossInterval: 10,
-    bossHpMult: 8,
-    bossTimeLimit: 30,  // seconds (OQ-3, timed burn)
+    goldGrowth: 1.14,   // gold multiplier per normal kill
+    goldCapKill: 40,    // OQ-4: base gold stops scaling past this kill
+
+    // Stage shape: `stageKills` normal enemies, then a boss at stage end.
+    stageKills: 40,
+    // Boss (OQ-3: pure DPS check, no timer). HP = capped stage-end HP × this.
+    bossHpMult: 25,
+    bossGoldMult: 20,   // lump gold bonus for clearing the boss
+    bossRefWindow: 20,  // "reasonable" clear time (s) used for the DPS-check readout
+
     // Attack-speed soft cap: beyond softCap, extra speed -> damage multiplier.
     speedSoftCap: 5.0,
   };
@@ -66,10 +71,14 @@
   function freshState(config) {
     return {
       gold: D(0),
-      kills: 0,              // enemies killed this stage
+      kills: 0,              // total normal+boss kills this run (lifetime)
+      stage: 0,              // current stage number (0 = Green Meadows)
+      stageKillIndex: 0,     // position within the current stage (0..stageKills = boss)
+      bossesCleared: 0,      // stages fully cleared via boss
       levels: Object.fromEntries(UPGRADES.map((u) => [u.id, 0])),
       enemyHP: null,         // current enemy's remaining HP (set on spawn)
       enemyMaxHP: null,
+      enemyIsBoss: false,
     };
   }
 
@@ -125,30 +134,60 @@
       .mul(s.critFactor);
   }
 
-  /* ---------- Enemy / gold curves ---------- */
+  /* ---------- Enemy / gold curves ----------
+   *
+   * Progression model (DESIGN OQ-3/OQ-4):
+   *   - A stage is a FIXED number of normal enemies (`stageKills`), then a BOSS.
+   *   - Normal enemy HP and *base* gold scale per kill but CAP at `hpCapKill` /
+   *     `goldCapKill` (OQ-4): past the cap, every normal enemy has identical HP
+   *     and identical base gold, so grinding yields flat income — a deliberate
+   *     plateau. The player can still grow gold via the gold-drop upgrade.
+   *   - The BOSS is a pure DPS check (OQ-3): a large FIXED-HP wall, no timer. You
+   *     can always eventually grind it down, but under-powered it takes absurdly
+   *     long, so in practice you grind the capped normals for upgrades first,
+   *     then attempt the boss when your DPS is high enough to kill it quickly.
+   *
+   * `killIndex` is the enemy's position within the current stage (0-based). */
 
-  function enemyHP(kills, config) {
+  // Where this kill index sits: a normal enemy or the stage boss.
+  function isBoss(stageKillIndex, config) {
     const cfg = config || CONFIG;
-    return D(cfg.baseHP).mul(D(cfg.hpGrowth).pow(kills));
+    return stageKillIndex >= cfg.stageKills;
   }
 
-  function isBossKill(killIndex, config) {
+  // Normal-enemy HP at a stage-local kill index, capped per OQ-4.
+  function normalHP(stageKillIndex, config) {
     const cfg = config || CONFIG;
-    return (killIndex + 1) % cfg.bossInterval === 0;
+    const effIndex = Math.min(stageKillIndex, cfg.hpCapKill);
+    return D(cfg.baseHP).mul(D(cfg.hpGrowth).pow(effIndex));
   }
 
-  // HP of the enemy at a given kill index (bosses are beefier).
-  function spawnHP(killIndex, config) {
+  // HP of whatever spawns at this stage-local kill index (normal or boss).
+  function spawnHP(stageKillIndex, config) {
     const cfg = config || CONFIG;
-    let hp = enemyHP(killIndex, config);
-    if (isBossKill(killIndex, config)) hp = hp.mul(cfg.bossHpMult);
-    return hp;
+    if (isBoss(stageKillIndex, config)) {
+      // Boss HP keyed to the (capped) normal HP at stage end, times a big mult.
+      return normalHP(cfg.stageKills, config).mul(cfg.bossHpMult);
+    }
+    return normalHP(stageKillIndex, config);
   }
 
-  function goldReward(killIndex, state, config) {
+  // Base gold for a kill, capped per OQ-4; multiplied by the player's goldMult.
+  // Bosses pay a lump bonus (bossGoldMult × the capped base).
+  function goldReward(stageKillIndex, state, config) {
     const cfg = config || CONFIG;
     const s = stats(state, config);
-    return D(cfg.baseGold).mul(D(cfg.goldGrowth).pow(killIndex)).mul(s.goldMult);
+    const effIndex = Math.min(stageKillIndex, cfg.goldCapKill);
+    let base = D(cfg.baseGold).mul(D(cfg.goldGrowth).pow(effIndex));
+    if (isBoss(stageKillIndex, config)) base = base.mul(cfg.bossGoldMult);
+    return base.mul(s.goldMult);
+  }
+
+  // Minimum DPS to clear the current boss "reasonably" (within refWindow secs).
+  // Pure reference for the UI / balance — not a hard gate.
+  function bossDpsCheck(config) {
+    const cfg = config || CONFIG;
+    return spawnHP(cfg.stageKills, config).div(cfg.bossRefWindow);
   }
 
   /* ---------- Costs + buying ---------- */
@@ -169,19 +208,50 @@
   }
 
   /* ---------- Combat step ----------
-   * Deal `seconds` of damage to the current enemy; when it dies, award gold and
-   * spawn the next. Returns { kills, goldGained } for this step. Non-boss model
-   * (continuous grind). Boss timed-fights are handled by the simulator/UI since
-   * they involve the manual-attempt gate (OQ-4). */
+   *
+   * Normal enemies auto-loop: you fight them continuously, and once you reach
+   * the stage's normal count (`stageKills`) you HOLD at the final capped normal
+   * (farm it for gold) instead of auto-spawning the boss. The BOSS is entered
+   * only by the player choosing to attempt it (`attemptBoss`) — a pure DPS check
+   * (OQ-3). Clearing the boss advances to the next stage and resets the stage
+   * kill index. This matches "grind freely, then press to attempt the boss."
+   */
 
   function ensureEnemy(state, config) {
-    if (state.enemyHP == null) {
-      state.enemyMaxHP = spawnHP(state.kills, config);
-      state.enemyHP = state.enemyMaxHP;
+    if (state.enemyHP == null) spawnNext(state, config);
+  }
+
+  // Spawn whatever the current stageKillIndex points at. If we're at/over
+  // stageKills and NOT in a boss attempt, hold at the last capped normal.
+  function spawnNext(state, config) {
+    const cfg = config || CONFIG;
+    if (state.enemyIsBoss) {
+      state.enemyMaxHP = spawnHP(cfg.stageKills, config);
+    } else {
+      const idx = Math.min(state.stageKillIndex, cfg.stageKills - 1);
+      state.enemyMaxHP = normalHP(idx, config);
     }
+    state.enemyHP = state.enemyMaxHP;
+  }
+
+  // Player chooses to fight the boss. Only valid once normals are cleared.
+  function attemptBoss(state, config) {
+    const cfg = config || CONFIG;
+    if (state.stageKillIndex < cfg.stageKills) return false; // not ready
+    if (state.enemyIsBoss) return true; // already fighting it
+    state.enemyIsBoss = true;
+    spawnNext(state, config);
+    return true;
+  }
+
+  // True once the player has farmed enough normals to attempt the boss.
+  function bossReady(state, config) {
+    const cfg = config || CONFIG;
+    return state.stageKillIndex >= cfg.stageKills;
   }
 
   function damageStep(state, seconds, config) {
+    const cfg = config || CONFIG;
     ensureEnemy(state, config);
     let dmg = dps(state, config).mul(seconds);
     let killsThisStep = 0;
@@ -190,13 +260,27 @@
 
     while (dmg.gt(0) && guard-- > 0) {
       if (dmg.gte(state.enemyHP)) {
-        // Enemy dies; carry remaining damage to the next.
         dmg = dmg.sub(state.enemyHP);
-        goldGained = goldGained.add(goldReward(state.kills, state, config));
-        state.kills += 1;
-        killsThisStep += 1;
-        state.enemyMaxHP = spawnHP(state.kills, config);
-        state.enemyHP = state.enemyMaxHP;
+
+        if (state.enemyIsBoss) {
+          // Boss down: award its gold, clear the stage, advance.
+          goldGained = goldGained.add(goldReward(cfg.stageKills, state, config));
+          state.kills += 1;
+          killsThisStep += 1;
+          state.bossesCleared += 1;
+          state.stage += 1;
+          state.stageKillIndex = 0;
+          state.enemyIsBoss = false;
+          spawnNext(state, config);
+        } else {
+          // Normal down: award gold. Advance stage index until the cap, then
+          // HOLD (repeat the final capped normal) pending a boss attempt.
+          goldGained = goldGained.add(goldReward(state.stageKillIndex, state, config));
+          state.kills += 1;
+          killsThisStep += 1;
+          if (state.stageKillIndex < cfg.stageKills) state.stageKillIndex += 1;
+          spawnNext(state, config);
+        }
       } else {
         state.enemyHP = state.enemyHP.sub(dmg);
         dmg = D(0);
@@ -210,8 +294,8 @@
     Decimal, D, UPGRADES, CONFIG,
     upgradeDef, freshState,
     statValue, stats, dps,
-    enemyHP, isBossKill, spawnHP, goldReward,
+    isBoss, normalHP, spawnHP, goldReward, bossDpsCheck,
     upgradeCost, buyUpgrade,
-    ensureEnemy, damageStep,
+    ensureEnemy, spawnNext, attemptBoss, bossReady, damageStep,
   };
 });

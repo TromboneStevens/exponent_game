@@ -191,15 +191,39 @@ console.log("combat: no overflow at high levels (break_infinity safety)");
   ok("DPS stays finite at huge stats", finite(dps) && dps.gt(0));
 }
 
-console.log("combat: simulator pacing + determinism");
+console.log("combat: enemy HP/gold cap (OQ-4)");
 {
-  const run = () => combatSim.simulate({ strategy: combatStrats.bestDpsPerGold, durationSeconds: 300, stepSeconds: 0.25 });
+  const cap = C.CONFIG.hpCapKill;
+  const atCap = C.normalHP(cap);
+  const pastCap = C.normalHP(cap + 50);
+  ok("normal HP stops scaling past the cap", atCap.eq(pastCap));
+  const st = C.freshState();
+  const gCap = C.goldReward(C.CONFIG.goldCapKill, st);
+  const gPast = C.goldReward(C.CONFIG.goldCapKill + 50, st);
+  ok("base gold stops scaling past the cap", gCap.eq(gPast));
+}
+
+console.log("combat: boss (OQ-3 pure DPS check, manual attempt)");
+{
+  const st = C.freshState();
+  ok("boss not ready before clearing normals", !C.bossReady(st));
+  ok("cannot attempt boss early", C.attemptBoss(st) === false);
+  st.stageKillIndex = C.CONFIG.stageKills; // farmed out the normals
+  ok("boss ready after normals", C.bossReady(st));
+  ok("can attempt boss now", C.attemptBoss(st) === true && st.enemyIsBoss);
+  ok("boss HP is a large fixed wall", C.spawnHP(C.CONFIG.stageKills).gt(C.normalHP(C.CONFIG.stageKills).mul(10)));
+}
+
+console.log("combat: simulator pacing + stage clear");
+{
+  const run = () => combatSim.simulate({ strategy: combatStrats.bestDpsPerGold, durationSeconds: 1800, stepSeconds: 0.25 });
   const a = run(), b = run();
   ok("deterministic final kills", a.final.kills === b.final.kills);
   ok("first goblin dies in ~4s", a.goals.find((g) => g.kills === 1).timeSeconds <= 5);
-  ok("buying outkills no-buy", (() => {
-    const nb = combatSim.simulate({ strategy: combatStrats.noBuy, durationSeconds: 300, stepSeconds: 0.25 });
-    return a.final.kills > nb.final.kills;
+  ok("clears the Stage-1 boss", a.final.bossesCleared >= 1);
+  ok("under-powered atk-only cannot out-DPS the boss", (() => {
+    const atk = combatSim.simulate({ strategy: combatStrats.atkOnly, durationSeconds: 1800, stepSeconds: 0.25, stopAtStage: Infinity });
+    return C.D(atk.final.dps).lt(C.D(atk.final.bossDpsCheck)) && atk.final.bossesCleared === 0;
   })());
 }
 

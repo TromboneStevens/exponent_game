@@ -51,19 +51,23 @@ function simulate(opts) {
     series.push({
       t: round(t, 2),
       kills: state.kills,
+      stage: state.stage,
+      bossesCleared: state.bossesCleared,
       gold: state.gold.toString(),
       dps: C.dps(state, config).toString(),
-      attackDamage: s.attackDamage,
+      attackDamage: s.attackDamage.toString ? s.attackDamage.toString() : s.attackDamage,
       attackSpeed: s.attackSpeed,
       effectiveAttackSpeed: s.effectiveAttackSpeed,
       critChance: s.critChance,
-      critMult: s.critMult,
-      goldMult: s.goldMult,
-      enemyHP: state.enemyHP ? state.enemyHP.toString() : "0",
+      critMult: s.critMult.toString ? s.critMult.toString() : s.critMult,
+      goldMult: s.goldMult.toString ? s.goldMult.toString() : s.goldMult,
       enemyMaxHP: state.enemyMaxHP ? state.enemyMaxHP.toString() : "0",
       levels: Object.assign({}, state.levels),
     });
   }
+
+  const stageGoals = (o.stageGoals || [1, 2, 3, 5, 10]).slice().sort((a, b) => a - b);
+  const stageHits = {};
 
   function checkGoals(t) {
     for (const g of killGoals) {
@@ -71,7 +75,17 @@ function simulate(opts) {
         goalHits[g] = { kills: g, timeSeconds: round(t, 2), gold: state.gold.toString(), dps: C.dps(state, config).toString() };
       }
     }
+    for (const sg of stageGoals) {
+      if (stageHits[sg] == null && state.bossesCleared >= sg) {
+        stageHits[sg] = { stage: sg, timeSeconds: round(t, 2), dps: C.dps(state, config).toString() };
+      }
+    }
   }
+
+  // Stage-1 focus: by default stop after clearing the first boss, since we're
+  // tuning ONE stage (per-stage escalation isn't modeled yet — see DESIGN OQ-8).
+  // Pass stopAtStage: Infinity to let it run through many stages.
+  const stopAtStage = o.stopAtStage != null ? o.stopAtStage : 1;
 
   C.ensureEnemy(state, config);
   sample(0);
@@ -90,10 +104,18 @@ function simulate(opts) {
     const ctx = makeCtx(state, config, t);
     strategy.decide(ctx);
 
-    // 3) Wall tracking: if kills didn't advance, the current enemy is taking long.
+    // 3) Boss attempt: when normals are farmed out, the strategy decides whether
+    //    to attempt the boss (pure DPS check). Default: attempt once DPS clears
+    //    the boss reference window, else keep grinding the capped normals.
+    if (C.bossReady(state, config) && !state.enemyIsBoss) {
+      const wantBoss = typeof strategy.attemptBoss === "function"
+        ? strategy.attemptBoss(ctx)
+        : C.dps(state, config).gte(C.bossDpsCheck(config));
+      if (wantBoss) C.attemptBoss(state, config);
+    }
+
+    // 4) Wall tracking: if kills didn't advance, the current enemy is taking long.
     if (state.kills > prevKills) {
-      const spent = t - currentEnemyStart;
-      // we may have killed several; approximate per-enemy time by the gap.
       currentEnemyStart = t;
       prevKills = state.kills;
     } else {
@@ -101,12 +123,15 @@ function simulate(opts) {
       if (stall > worstStall.seconds) worstStall = { kills: state.kills, seconds: round(stall, 2) };
     }
 
-    // 4) Record.
+    // 5) Record.
     checkGoals(t);
     if (t - lastSampleAt >= sampleEvery || i === totalSteps - 1) {
       sample(t);
       lastSampleAt = t;
     }
+
+    // 6) Stop once we've cleared the target number of stages (Stage-1 focus).
+    if (state.bossesCleared >= stopAtStage) { sample(t); break; }
   }
 
   const finalStats = C.stats(state, config);
@@ -119,12 +144,16 @@ function simulate(opts) {
     },
     final: {
       kills: state.kills,
+      stage: state.stage,
+      bossesCleared: state.bossesCleared,
       gold: state.gold.toString(),
       dps: C.dps(state, config).toString(),
+      bossDpsCheck: C.bossDpsCheck(config).toString(),
       stats: finalStats,
       levels: Object.assign({}, state.levels),
     },
     goals: killGoals.map((g) => goalHits[g] || { kills: g, timeSeconds: null, reached: false }),
+    stageGoals: stageGoals.map((g) => stageHits[g] || { stage: g, timeSeconds: null, reached: false }),
     worstStall,
     series,
   };
@@ -137,6 +166,8 @@ function makeCtx(state, config, t) {
     stats: () => C.stats(state, config),
     cost: (id) => C.upgradeCost(C.upgradeDef(id), state.levels[id]),
     buy: (id) => C.buyUpgrade(state, id, config),
+    bossReady: () => C.bossReady(state, config),
+    bossDpsCheck: () => C.bossDpsCheck(config),
   };
 }
 
