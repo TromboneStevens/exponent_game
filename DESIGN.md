@@ -112,16 +112,101 @@ reskin + one new gating rule, not an economy rewrite:
 Generators become **DPS sources** (summons/weapons/party members). Prestige depth
 becomes **how far you've fought**.
 
-**Open boss-fight forks (carried over, still unresolved):**
-- **OQ-2 (currency model):** one currency (damage == the current number) vs. a
-  separate "gold" dropped by monsters that you spend on DPS upgrades (true
-  Tap-Titans model). Leaning single-currency first (reskin, not rewrite).
+**Open boss-fight forks:**
+- **OQ-2 (currency model): DECIDED → gold.** Monsters drop **gold**; gold buys
+  DPS/economy upgrades (true Tap-Titans model). This supersedes the energy model
+  for the combat layer. See §5.1.1.
 - **OQ-3 (boss = what?):** a HP pool you must burn down within a **time limit**
   (DPS × time ≥ bossHP), fail → keep grinding normals, retry on demand. Leaning
   timer-based (that's the actual challenge).
 - **OQ-4 (manual gate):** bosses become **manual gates** — normal-monster
   progress **caps just below** the next boss until you beat it via a button.
   This is the main behavioral change vs. today's auto-advancing depth.
+
+### 5.1.1 Stage-1 combat loop (Green Meadows) — `planned`
+
+The concrete initial gameplay loop. First enemy: a **Goblin**.
+
+```
+auto-attack → damage enemy → enemy dies → gold drops
+   → spend gold on upgrades → kill faster → next enemy (more HP) → …
+```
+
+**Effective DPS model.** A hit lands every `1/attackSpeed` seconds for
+`attackDamage`, with crits scaling by `critMult`:
+
+```
+critFactor = 1 + critChance * (critMult - 1)      # expected-value of crits
+dps        = attackDamage * attackSpeed * critFactor
+timeToKill = enemyHP / dps
+```
+
+**Upgrades (5 tracks).** Each is a level-based buy; cost rises per level.
+
+| # | Upgrade | Lever | First-pass base / per-level | Cost (base, mult) |
+|---|---------|-------|------------------------------|-------------------|
+| 1 | Attack Damage | `attackDamage` | base 1, +1 per level (×? TBD) | 10, ×1.07 |
+| 2 | Attack Speed | `attackSpeed` (hits/s) | base 1.0, +0.1/level, **soft-cap** | 25, ×1.12 |
+| 3 | Gold Drop | gold per kill ×  | base ×1, +10%/level | 20, ×1.10 |
+| 4 | Crit Chance | `critChance` | base 0, +2%/level (cap ~50–75%?) | 40, ×1.15 |
+| 5 | Crit Damage | `critMult` | **base 1.1×**, +0.1/level | 60, ×1.18 |
+
+> **Crit split (user):** crit *chance* and crit *damage* are separate tracks (#4,
+> #5). Crit damage starts small at **1.1×** and climbs. Chance alone does nothing
+> until there's crit damage above 1×, so early on #5 gates #4's value.
+
+**Starting feel (user):** with only the first upgrade, the Goblin takes **~4–5
+hits** to kill. So `goblinHP ≈ 4–5 × base attackDamage` at level 1.
+
+**Enemy HP scaling.** `enemyHP(n) = baseHP × hpGrowth^n` where `n` = enemies
+killed this stage. `hpGrowth` is THE pacing knob (see §5.1.2 findings). Bosses
+(every K kills) get an HP multiplier and the timed fight (OQ-3).
+
+**Gold reward.** `gold(n) = baseGold × goldGrowth^n × goldDropMult`. Must grow
+slower than HP×cost so upgrades stay meaningful but you don't stall.
+
+**Attack-speed soft cap (OQ-10):** past a cap (e.g. 5 hits/s) extra speed becomes
+a flat damage multiplier instead of literal swings (engine can't show 50/s).
+
+**Open sub-questions:**
+- **OQ-10** attack-speed cap value + overflow-to-damage conversion.
+- **OQ-11** crit-chance cap (avoid 100% trivializing the EV model).
+- **OQ-12** does gold also feed prestige/depth, or is depth = stage/kills only?
+  (Lean: depth = stage reached; gold is in-stage only. Keeps layers clean.)
+
+### 5.1.2 Stage-1 balance findings (from the simulator)
+
+Tuned with `node sim/run.js combat` (see §8). **First-pass defaults** now in
+`combat.js`:
+
+- Upgrade cost multipliers raised (atk ×1.15, spd ×1.5, gold ×1.25, critChance
+  ×1.4, critDmg ×1.35) so spend keeps pace with exponential HP.
+- `baseHP 4`, `hpGrowth 1.12`; `baseGold 4`, `goldGrowth 1.14`.
+
+**Findings:**
+- **Starting feel is right:** 1st goblin dies in **4s**, kill 5 ~20s, kill 10
+  ~47s — snappy early game matching the "4–5 hits" target.
+- **`hpGrowth` vs `goldGrowth` is THE knob.** When `hpGrowth > goldGrowth` the
+  stage hard-walls (income can't fund the next kill); the *gap* sets how
+  gradually it slows. Sweep (best-dps-per-gold, 30m): hp 1.12→79 kills, 1.13→69,
+  1.14→63, 1.15→59. Picked **1.12** (just under gold's 1.14) for a long, gradual
+  wall rather than a cliff.
+- **No single-stat dominance.** Over 1h: atk-only 69 kills < round-robin 89 ≈
+  best-dps-per-gold 89 — pouring everything into damage *under*performs spreading
+  across the 5 tracks, so the upgrades genuinely complement each other.
+- **`no-buy` walls at ~38 kills** — doing nothing progresses a little then stalls,
+  confirming buying matters without instantly punishing idle.
+- **Soft wall ~kill 50–89 in an hour** — a natural "time to get stronger / prestige"
+  pressure point for the stage to hand off. Good.
+
+**Bug caught by the sim (now fixed):** multiplicative stats (`goldMult`,
+`critMult`) were plain-float `Math.pow`, so after thousands of levels `goldMult`
+overflowed to `Infinity` — the exact failure `break_infinity.js` exists to
+prevent. Unbounded stats are now `Decimal`. Regression-tested in `sim/test.js`.
+
+**Still open:** OQ-10 (speed cap overflow value), OQ-11 (crit-chance cap — set to
+60% for now), OQ-12 (does gold feed depth?). Boss timed-fights (OQ-3/4) not yet
+modeled in the combat sim.
 
 ### 5.2 Idols (per-run roguelike draft) — `live`
 
@@ -240,7 +325,8 @@ piece of net-new work on the table. Prototype it small first.
 | 9 | Tap-Titans-style layout: hero attacking monsters, scaling health bars | `considering` | §5.1 |
 | 10 | Bosses at thresholds with bigger health bars | `considering` | §5.1 / OQ-3 |
 | 11 | Manual boss attempt button; fail → back to normals; retry on demand | `considering` | §5.1 / OQ-4 |
-| 12 | Separate monster-drop currency (gold) vs. single damage number | `considering` | OQ-2 |
+| 12 | Separate monster-drop currency (gold) vs. single damage number | `planned` (gold chosen) | §5.1.1, combat.js |
+| 17 | Stage-1 combat loop: 5 upgrades (dmg/spd/gold/crit%/critDmg) | `planned` | §5.1.1 — built in combat.js |
 | 13 | Parallel (non-backbone) layers | `parked` | §3 / OQ-1 — revisit later |
 | 14 | Ordered stage ladder (Meadows → … → Void → Steampunk → TBD) | `considering` | §5.4 — stage == P-level |
 | 15 | Element-combining system across the dimension stages (→ Void) | `raw` | §5.4 Act III hook |
@@ -252,8 +338,9 @@ piece of net-new work on the table. Prototype it small first.
 
 - **OQ-1 — Layers strictly chained, or allow parallel/optional ones?**
   Decision for now: **chained** (layered by default). Parallel = `parked`.
-- **OQ-2 — Combat currency model:** single damage number vs. separate gold drop.
-- **OQ-3 — Boss mechanic:** timed HP burn vs. instant DPS check.
+- **OQ-2 — Combat currency model: DECIDED → gold drop** (Tap-Titans model). Built
+  in `combat.js` / `sim/combat.js`.
+- **OQ-3 — Boss mechanic:** timed HP burn vs. instant DPS check. *(Not yet modeled.)*
 - **OQ-4 — Boss gating:** do normals cap just below the next boss (manual gate)?
 - **OQ-5 — Themes cosmetic or mechanical?** Start cosmetic; revisit.
 - **OQ-6 — Tavern relationship:** `feedback(combat, ×mult)` vs. `self-contained`?
@@ -263,8 +350,13 @@ piece of net-new work on the table. Prototype it small first.
   open: is it exactly 1 stage per single P-level, or does a stage span a few
   P-levels once the depth curve is tuned? (Affects how long each theme lasts.)
 - **OQ-9 — Per-stage currencies?** Do deep-earth / dimension stages introduce
-  their own currencies (gems, elements), or stay on the single combat number
-  until a formal subsystem unlocks? Ties into OQ-2 and the currency ladder.
+  their own currencies (gems, elements), or stay on gold until a formal subsystem
+  unlocks? Ties into the currency ladder.
+- **OQ-10 — Attack-speed soft cap.** Current: literal swings cap at 5/s, overflow
+  becomes a flat damage multiplier. Cap value TBD.
+- **OQ-11 — Crit-chance cap.** Set to 60% for now so the EV model stays sane.
+- **OQ-12 — Does gold feed depth/prestige,** or is depth = stage/kills only?
+  (Lean: depth = stage reached; gold is in-stage only. Keeps layers clean.)
 
 **Build-order dependencies:**
 1. Settle the combat forks (OQ-2/3/4) → reskin Layer 0 into the battler. *(First
@@ -279,10 +371,26 @@ piece of net-new work on the table. Prototype it small first.
 
 The headless simulator (`sim/`) is how we keep this balanced. As systems land it
 must keep pace, or we lose the ability to answer "how long does X take?":
-- Combat reskin: mostly free — it's the same economy; add boss-attempt modeling
-  (DPS vs. HP vs. timer) if OQ-3 goes timer-based.
-- Each new currency/layer: needs its own economy functions in `economy.js` and a
-  way for strategies to "play" it, so runs spanning multiple layers stay
-  measurable.
-- Keep the **single-source-of-truth** rule: new systems go in `economy.js`
-  (shared), never reimplemented in the sim.
+
+**Two economies, two sims (both shared source-of-truth):**
+- `economy.js` + `sim/{simulator,strategies,scenarios}.js` — the prestige / idle /
+  idols / meta layer.
+- `combat.js` + `sim/{combat,combatStrategies,combatReport}.js` — the Stage-1
+  autobattler (gold / DPS / enemies).
+
+**Combat sim usage:**
+```
+node sim/run.js combat                         # one strategy, default tuning
+node sim/run.js combat --strategies=no-buy,atk-only,round-robin,best-dps-per-gold
+node sim/run.js combat --hpGrowth=1.13 --goldGrowth=1.14 --duration=30m
+node sim/run.js combat --strategy=best-dps-per-gold --kills=1,10,50,100
+```
+Overridable combat CONFIG via flags: `baseHP, hpGrowth, baseGold, goldGrowth,
+bossInterval, bossHpMult, bossTimeLimit, speedSoftCap`. Buy-strategies:
+`no-buy, atk-only, round-robin, best-dps-per-gold`. Output: kill-goal timings,
+a per-sample series CSV (DPS/gold/stats/levels), and JSON.
+
+**Still to add:** boss timed-fight modeling (OQ-3/4); eventually connect the
+combat layer to prestige so a full run spans both. Keep the
+**single-source-of-truth** rule: new systems go in the shared economy modules,
+never reimplemented inside `sim/`.

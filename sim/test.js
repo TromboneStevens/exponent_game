@@ -142,5 +142,66 @@ console.log("simulator: idol pick policy chooses the preferred type");
   ok("thrift build picks the cost idol", picker({ choices }) === "idol_thrift");
 }
 
+/* ---------- Stage-1 combat economy ---------- */
+const C = require("../combat.js");
+const combatSim = require("./combat.js");
+const combatStrats = require("./combatStrategies.js");
+
+console.log("combat: starting feel + DPS formula");
+{
+  const st = C.freshState();
+  const s = C.stats(st);
+  ok("starts at 1 dmg, 1 atk/s", C.D(s.attackDamage).eq(1) && s.attackSpeed === 1);
+  ok("starting DPS = 1", C.dps(st).eq(1));
+  ok("goblin dies in ~4 hits (baseHP 4 vs 1 dmg)", C.spawnHP(0).eq(4));
+  // crit EV: 50% chance @ 2x => factor 1.5
+  st.levels.critchance = 50; st.levels.critdmg = 18; // chance .5 (capped .6 ok), mult 1.1+.9=2.0
+  const s2 = C.stats(st);
+  ok("crit factor is expected-value", approx(C.D(s2.critFactor).toNumber(), 1 + s2.critChance * (C.D(s2.critMult).toNumber() - 1), 1e-9));
+}
+
+console.log("combat: buying + caps");
+{
+  const st = C.freshState();
+  st.gold = C.D("1000");
+  const before = C.dps(st).toNumber();
+  ok("can buy attack damage", C.buyUpgrade(st, "atk"));
+  ok("damage upgrade raises DPS", C.dps(st).toNumber() > before);
+  // crit chance has a hard cap; buying past it must fail.
+  const st2 = C.freshState(); st2.gold = C.D("1e9");
+  let guard = 1000; while (guard-- > 0 && C.buyUpgrade(st2, "critchance")) {}
+  ok("crit chance respects its cap", C.statValue(C.upgradeDef("critchance"), st2.levels.critchance) <= C.upgradeDef("critchance").cap + 1e-9);
+}
+
+console.log("combat: no overflow at high levels (break_infinity safety)");
+{
+  // goldMult is multiplicative (base*(1.08)^level): at 10000 levels it's ~1e334,
+  // which overflows a plain JS float to Infinity. As a Decimal it stays usable —
+  // this is the exact bug the sim caught and the Decimal conversion fixed.
+  const st = C.freshState();
+  st.levels.gold = 10000;
+  st.levels.atk = 10000;   // additive -> 10001, small; just confirm it's Decimal
+  const s = C.stats(st);
+  const dps = C.dps(st);
+  // A float-overflowed value becomes Infinity, whose Decimal mantissa is not
+  // finite. Decimal keeps mantissa+exponent separate, so it stays usable.
+  const finite = (d) => Number.isFinite(C.D(d).mantissa) && C.D(d).gt(0);
+  ok("multiplicative goldMult passes 1e100 without overflow", finite(s.goldMult) && C.D(s.goldMult).gt("1e100"));
+  ok("attackDamage is a usable Decimal", finite(s.attackDamage) && C.D(s.attackDamage).eq(10001));
+  ok("DPS stays finite at huge stats", finite(dps) && dps.gt(0));
+}
+
+console.log("combat: simulator pacing + determinism");
+{
+  const run = () => combatSim.simulate({ strategy: combatStrats.bestDpsPerGold, durationSeconds: 300, stepSeconds: 0.25 });
+  const a = run(), b = run();
+  ok("deterministic final kills", a.final.kills === b.final.kills);
+  ok("first goblin dies in ~4s", a.goals.find((g) => g.kills === 1).timeSeconds <= 5);
+  ok("buying outkills no-buy", (() => {
+    const nb = combatSim.simulate({ strategy: combatStrats.noBuy, durationSeconds: 300, stepSeconds: 0.25 });
+    return a.final.kills > nb.final.kills;
+  })());
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

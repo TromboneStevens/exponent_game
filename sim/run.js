@@ -46,6 +46,9 @@
 const path = require("path");
 const scenarios = require("./scenarios.js");
 const report = require("./report.js");
+const combatSim = require("./combat.js");
+const combatStrategies = require("./combatStrategies.js");
+const combatReport = require("./combatReport.js");
 
 function parseArgs(argv) {
   const args = { _: [] };
@@ -88,11 +91,16 @@ function coerceValue(v) {
 function main() {
   const args = parseArgs(process.argv.slice(2));
   const scenario = args._[0] || "single";
+  const writeFiles = !args["no-files"];
+  const outDir = args.out || path.join(__dirname, "out");
+
+  // The combat scenario uses a separate economy (combat.js) with its own
+  // strategies, config keys, and report shape — handle it independently.
+  if (scenario === "combat") { runCombat(args, writeFiles, outDir); return; }
+
   const duration = parseDuration(args.duration, 86400);
   const step = args.step != null ? Number(args.step) : 1;
   const seed = args.seed != null ? Number(args.seed) : 1;
-  const writeFiles = !args["no-files"];
-  const outDir = args.out || path.join(__dirname, "out");
   const common = { durationSeconds: duration, stepSeconds: step, seed };
 
   let bundle;
@@ -161,5 +169,53 @@ function printReport(scenario, bundle) {
 
 function pad(s, n) { s = String(s); return s.length >= n ? s : s + " ".repeat(n - s.length); }
 function sanitize(s) { return String(s).replace(/[^a-z0-9._-]+/gi, "_"); }
+
+/* ---------- Combat scenario (Stage-1 autobattler) ----------
+ * node sim/run.js combat [--strategy=..|--strategies=a,b,c] [--duration=10m]
+ *   [--step=0.25] [--hpGrowth=1.1] [--goldGrowth=1.08] [--baseHP=4] [--kills=1,10,50]
+ * Compares buy-strategies if --strategies is given, else runs one. */
+function runCombat(args, writeFiles, outDir) {
+  const duration = parseDuration(args.duration, 600);
+  const step = args.step != null ? Number(args.step) : 0.25;
+
+  // Allow overriding any combat CONFIG numeric from the CLI.
+  const configKeys = ["baseHP", "hpGrowth", "baseGold", "goldGrowth", "bossInterval", "bossHpMult", "bossTimeLimit", "speedSoftCap"];
+  const config = {};
+  for (const k of configKeys) if (args[k] != null) config[k] = coerceValue(args[k]);
+
+  const killGoals = args.kills ? parseList(args.kills).map(Number) : undefined;
+
+  const names = parseList(args.strategies) || (args.strategy ? [args.strategy] : ["best-dps-per-gold"]);
+  const results = names.map((n) => {
+    const strat = combatStrategies.byName(n);
+    if (!strat) { console.error(`Unknown combat strategy "${n}". Available: ${Object.values(combatStrategies.ALL).map((x) => x.name).join(", ")}`); process.exit(1); }
+    return combatSim.simulate({ strategy: strat, durationSeconds: duration, stepSeconds: step, config, killGoals });
+  });
+
+  console.log("=".repeat(64));
+  if (results.length > 1) {
+    console.log("COMBAT STRATEGY COMPARISON — time to each kill goal\n");
+    console.log(combatReport.comparisonTable(results));
+  } else {
+    console.log(combatReport.summaryText(results[0]));
+  }
+  console.log("=".repeat(64));
+
+  if (writeFiles) {
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const prefix = path.join(outDir, `combat-${stamp}`);
+    const written = [];
+    results.forEach((r) => {
+      const tag = results.length > 1 ? `-${sanitize(r.meta.strategy)}` : "";
+      written.push(combatReport.write(`${prefix}${tag}.series.csv`, combatReport.seriesToCsv(r)));
+    });
+    written.push(combatReport.write(`${prefix}.goals.csv`, combatReport.goalsToCsv(results)));
+    written.push(combatReport.write(`${prefix}.json`, JSON.stringify(results.length === 1 ? results[0] : results, null, 2)));
+    console.log("\nWrote:");
+    for (const w of written) console.log("  " + path.relative(process.cwd(), w));
+  }
+
+  if (args.json) console.log("\n" + JSON.stringify(results.length === 1 ? results[0] : results, null, 2));
+}
 
 main();
