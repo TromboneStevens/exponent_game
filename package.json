@@ -1,0 +1,16 @@
+{
+  "name": "quantum-forge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Prototype mobile incremental/idle game (break_infinity.js) with a headless balance simulator.",
+  "type": "commonjs",
+  "scripts": {
+    "sim": "node sim/run.js",
+    "sim:compare": "node sim/run.js compare --duration=1d",
+    "sim:prestige": "node sim/run.js prestige --duration=3d",
+    "test": "node sim/test.js"
+  },
+  "dependencies": {
+    "break_infinity.js": "^2.0.0"
+  }
+}
