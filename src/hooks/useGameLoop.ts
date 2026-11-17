@@ -1,1 +1,0 @@
-export function useGameLoop() { /* manages the exponential tick rate */ }
