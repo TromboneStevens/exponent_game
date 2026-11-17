@@ -135,20 +135,65 @@ Prestige Points earned on macro-reset (exponential in depth, continuous); spent
 in a permanent shop that never resets. Reflavor as a persistent "hero"/"legacy"
 track. No mechanical change planned yet.
 
-### 5.4 Theme escalation — `considering`
+### 5.4 Stage / theme ladder — `considering`
 
-Setting changes at depth bands. First-pass band sketch (numbers TBD):
+**Decision:** a **stage == a prestige level**. The stage list below *is* the
+P-ladder — clearing a boss advances you one named stage (Green Meadows = P0,
+Forest = P1, …). Theme and depth are the same axis; no separate layer.
 
-| Depth band | Theme (sketch) |
-|---|---|
-| P0–P? | Medieval fantasy |
-| P?–P? | Steampunk |
-| P?–P? | Dark / souls-like dark fantasy |
-| P?+ | ??? (cosmic / sci-fi / beyond) |
+**Decision:** stages are **thematic for now**, but any stage may later carry a
+**mechanical hook** — a subsystem unlock or a new rule, if a stage inspires one.
+So a stage is the natural anchor for *where* subsystem layers (§5.5/§5.6) unlock.
+Each stage is therefore either purely cosmetic or tagged with a `mechanicalHook`.
 
-**Scope note:** cheapest version is purely cosmetic (palette, enemy art, labels
-swap per band). A richer version changes *mechanics* per theme — much bigger.
-Start cosmetic. **OQ-5:** cosmetic-only, or do themes change rules?
+Stages are grouped into **acts** (my proposed grouping; order is the user's exact
+list). P-numbers are placeholders — the ladder may not be 1 stage per single
+P-level once tuned (see OQ-8). **All art is placeholder for now.**
+
+**Act I — Overworld descent** (classic fantasy start)
+
+| # | Stage | P (sketch) | Candidate mechanical hook |
+|---|-------|-----------|---------------------------|
+| 1 | Green Meadows | P0 | — (start) |
+| 2 | Forest | P1 | **After Forest:** unlock **Tavern** sim (§5.6) |
+| 3 | Icy Mountain | P2 | — |
+| 4 | Caverns | P3 | — |
+| 5 | Underground Ancient Ruins | P4 | — |
+
+**Act II — Deep earth**
+
+| # | Stage | P (sketch) | Candidate mechanical hook |
+|---|-------|-----------|---------------------------|
+| 6 | Gem Mines | P5 | — (gem/resource currency?) |
+| 7 | Lava Caverns | P6 | — (bridges into the elemental dimensions) |
+
+**Act III — Elemental dimensions** (a themed set of 5; Void is the capstone)
+
+| # | Stage | P (sketch) | Candidate mechanical hook |
+|---|-------|-----------|---------------------------|
+| 8  | Flame Elemental Dimension | P7  | Unlock **element-combining** system (see below) |
+| 9  | Earth Dimension | P8  | element system continues |
+| 10 | Water Dimension | P9  | element system continues |
+| 11 | Air Dimension   | P10 | element system continues |
+| 12 | Void Dimension  | P11 | **capstone:** combine all elements to break into Void |
+
+> **Element-combining hook (user idea):** across the dimension stages you collect
+> elements and combine them to boost score, with reaching Void as the payoff.
+> This is a candidate `feedback`-type subsystem (§3) gated across stages 8–12.
+> Tagged `raw` — a real system to design later, not a reskin.
+
+**Act IV+ — Multiverse** (theme stops being natural-world; goes unique)
+
+| # | Stage | P (sketch) | Notes |
+|---|-------|-----------|-------|
+| 13 | Steampunk | P12 | "jumping multiverses" — first non-natural theme |
+| 14+ | TBD | P13+ | dark fantasy / cosmic / sci-fi / beyond |
+
+**Scope note:** cheapest version of the whole ladder is cosmetic (palette, enemy
+art, stage name swap per stage). Mechanical hooks (Tavern, element system) are
+opt-in per stage and are the expensive part. Start cosmetic; add hooks only where
+a stage genuinely inspires one. **OQ-5:** which stages (if any) change *rules* vs.
+just looks?
 
 ### 5.5 Subsystem framework — `planned` (framework), `raw` (each instance)
 
@@ -165,7 +210,7 @@ before we have one real example.
 
 First candidate subsystem layer, to learn the pattern on.
 
-- **Unlock:** some prestige threshold (TBD).
+- **Unlock:** **after the Forest stage (P1→P2)** — see §5.4 ladder.
 - **Currency:** e.g. "Coin," separate from combat energy.
 - **Build:** run a tavern — micro-progression (buy tables/staff/menu, serve
   patrons) grinding Coin.
@@ -197,6 +242,9 @@ piece of net-new work on the table. Prototype it small first.
 | 11 | Manual boss attempt button; fail → back to normals; retry on demand | `considering` | §5.1 / OQ-4 |
 | 12 | Separate monster-drop currency (gold) vs. single damage number | `considering` | OQ-2 |
 | 13 | Parallel (non-backbone) layers | `parked` | §3 / OQ-1 — revisit later |
+| 14 | Ordered stage ladder (Meadows → … → Void → Steampunk → TBD) | `considering` | §5.4 — stage == P-level |
+| 15 | Element-combining system across the dimension stages (→ Void) | `raw` | §5.4 Act III hook |
+| 16 | Stages anchor subsystem unlocks (e.g. Tavern after Forest) | `considering` | §5.4 / §5.6 |
 
 ---
 
@@ -211,6 +259,12 @@ piece of net-new work on the table. Prototype it small first.
 - **OQ-6 — Tavern relationship:** `feedback(combat, ×mult)` vs. `self-contained`?
 - **OQ-7 — How different must each layer be?** Genuinely new rules vs. reskinned
   generator loop. Affects how many layers are realistic.
+- **OQ-8 — Stage ↔ P-level granularity.** Decided: stage == prestige level. Still
+  open: is it exactly 1 stage per single P-level, or does a stage span a few
+  P-levels once the depth curve is tuned? (Affects how long each theme lasts.)
+- **OQ-9 — Per-stage currencies?** Do deep-earth / dimension stages introduce
+  their own currencies (gems, elements), or stay on the single combat number
+  until a formal subsystem unlocks? Ties into OQ-2 and the currency ladder.
 
 **Build-order dependencies:**
 1. Settle the combat forks (OQ-2/3/4) → reskin Layer 0 into the battler. *(First
