@@ -38,8 +38,9 @@ jobs:
         # combat.js is the module the combat UI loads; economy.js is kept too
         # (unused by the UI for now, harmless, slated for a later prestige layer).
         run: |
-          mkdir -p _site
+          mkdir -p _site/assets/hero
           cp index.html styles.css combat.js economy.js game.js _site/
+          cp assets/hero/*.png _site/assets/hero/
 
       - name: Upload site
         uses: actions/upload-pages-artifact@v3

@@ -83,10 +83,11 @@ html, body {
 
 .arena {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: 1fr 1fr 1fr;
   align-items: center;
-  gap: 8px;
-  min-height: 140px;
+  gap: 4px;
+  height: 230px;
+  overflow: hidden;
 }
 .sprite {
   font-size: 56px;
@@ -94,10 +95,33 @@ html, body {
   filter: drop-shadow(0 4px 6px rgba(0,0,0,0.5));
 }
 .hero { text-align: center; }
-.hero-sprite { animation: bob 1.8s ease-in-out infinite; }
-.hero.attack { animation: lunge 0.18s ease; }
-@keyframes bob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
-@keyframes lunge { 0% { transform: translateX(0); } 50% { transform: translateX(12px); } 100% { transform: translateX(0); } }
+
+/* Hero sprite animation (CraftPix swordsman, lvl1).
+ * Each sheet is a horizontal strip of 64x256 frames. We show one 64px-wide
+ * window and step background-position across the frames.
+ * --scale enlarges the pixel art; --atk-dur is set from JS to match attack cadence. */
+.hero-sprite {
+  --scale: 0.82;
+  --atk-dur: 0.4s;
+  width: 64px;
+  height: 256px;
+  transform: scale(var(--scale));
+  transform-origin: center center;
+  margin: 0 auto;
+  background-repeat: no-repeat;
+  background-image: url("assets/hero/swordsman_idle.png");
+  background-position: 0 0;
+  image-rendering: pixelated;      /* crisp pixel-art scaling */
+  image-rendering: crisp-edges;
+  animation: hero-idle 1.6s steps(12) infinite;
+}
+/* Attack state: swap to the attack sheet and play it once per swing. */
+.hero-sprite.attacking {
+  background-image: url("assets/hero/swordsman_attack.png");
+  animation: hero-attack var(--atk-dur) steps(8) 1;
+}
+@keyframes hero-idle   { from { background-position: 0 0; } to { background-position: -768px 0; } }  /* 12 * 64 */
+@keyframes hero-attack { from { background-position: 0 0; } to { background-position: -512px 0; } }  /* 8 * 64 */
 
 .combat-space { position: relative; text-align: center; height: 140px; display: flex; flex-direction: column; justify-content: center; }
 .dps-readout { font-size: 13px; color: var(--accent-2); font-weight: 700; }
