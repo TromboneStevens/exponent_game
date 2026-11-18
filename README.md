@@ -1,56 +1,65 @@
-# Quantum Forge
+# Infinity Slayer
 
-A prototype **mobile idle / incremental game** built around
+A prototype **mobile idle autobattler** built around
 [`break_infinity.js`](https://github.com/Patashu/break_infinity.js) for
-large-number math, with a roguelike idol layer and permanent meta-progression —
-plus a **headless balance simulator** for fast, data-driven tuning.
+large-number math — plus a **headless balance simulator** for fast, data-driven
+tuning.
 
-Generation is **idle** (no tapping): you buy generators and upgrades, and energy
-accrues on its own. The game layers three progression systems:
+> Formerly "Quantum Forge." See `DESIGN.md` for the full vision (escalating
+> fantasy stages, roguelike idols, and permanent meta-progression). This
+> prototype currently implements the **Stage-1 combat loop**.
 
-1. **Prestige depth (P0, P1, P2 …)** — a *continuous* progress axis. P-levels are
-   thresholds along it, so a strong player blows through early tiers in moments
-   and plateaus deeper in.
-2. **Idols** — a per-run roguelike draft. At the start of every run you're shown
-   **3 random idols and pick 1**; its bonus lasts the whole run. Idols define
-   your "build" and are cleared on macro-reset.
-3. **Meta-progression** — a **permanent** shop bought with **Prestige Points**
-   (earned on every macro-reset, scaling exponentially with how deep you got).
-   Meta-shop upgrades never reset and drive the overarching loop.
+## The game (combat loop)
 
-A **macro-reset** is the only hard reset: it banks Prestige Points, redrafts your
-idol, and restarts you at P0 with permanent bonuses intact — so each run pushes
-deeper than the last.
+The hero **auto-attacks** enemies; you don't tap. Enemies drop **gold**, which
+you spend on 5 upgrade tracks:
+
+- **Attack Damage**, **Attack Speed** (soft-capped), **Gold Drop**,
+  **Crit Chance**, **Crit Damage** (separate track).
+
+Each stage is a run of normal enemies, then a **boss**:
+
+- Normal enemy HP and base gold **cap** partway through a stage, so grinding
+  becomes flat income — a deliberate plateau that pushes you to upgrade.
+- The **boss is a pure DPS check** (no timer): a large fixed-HP wall you *attempt*
+  on demand. Enough DPS clears it quickly; under-powered it's a wall. Clearing it
+  advances to the next stage.
+
+## Two economies in this repo
+
+The player-facing game is the **combat** autobattler (`combat.js`). The repo also
+contains a separate **idle/prestige economy** (`economy.js` — generators, idols,
+a meta-shop) that is fully simulated and slated to become a later prestige layer
+per `DESIGN.md`, but is **not** currently wired into the UI.
+
+Both are pure, shared, UMD-style modules (`window.Combat` / `window.Economy` in
+the browser; `require` in Node), so the simulator exercises the **exact same
+code** the game runs — balance numbers never drift from a re-implementation.
 
 ---
 
 ## Repository layout
 
 ```
-index.html        Mobile-first idle game UI (loads break_infinity.js from CDN)
+index.html        Combat UI (Infinity Slayer; loads break_infinity.js from CDN)
 styles.css        Dark, touch-sized, safe-area-aware styling
-economy.js        Shared economy module — the SINGLE SOURCE OF TRUTH
-game.js           Browser UI layer (DOM, timers, draft, save/load)
+combat.js         Combat economy (gold/DPS/enemies) — shared source of truth
+economy.js        Idle/prestige economy (generators/idols/meta) — shared, sim-only for now
+game.js           Browser UI layer for the combat game (DOM, loop, save/load)
+DESIGN.md         Living design doc: vision, stage ladder, open questions
 sim/
-  simulator.js    Headless simulation engine (idle + idols + meta-resets)
-  strategies.js   Automated "player" strategies + idol-build archetypes
-  scenarios.js    Predefined experiments (milestones, compare, builds, sweep, metarun)
-  run.js          CLI entry point (console + CSV/JSON output)
-  report.js       CSV builders, console summaries, comparison tables
-  test.js         Economy + simulator sanity tests (npm test)
-  dom-smoke.js    Headless browser-UI smoke test via jsdom (run manually)
-package.json      Scripts and the break_infinity.js dependency (for the sim)
+  combat.js          Headless combat simulator
+  combatStrategies.js  Buy-strategies (no-buy, atk-only, round-robin, best-dps-per-gold)
+  combatReport.js    Combat CSV / console reporting
+  simulator.js       Idle/prestige simulation engine
+  strategies.js      Idle strategies + idol-build archetypes
+  scenarios.js       Idle experiments
+  report.js          Idle CSV / console reporting
+  run.js             CLI entry point for BOTH sims (console + CSV/JSON output)
+  test.js            Sanity tests for both economies (npm test)
+  dom-smoke.js       Headless browser-UI smoke test via jsdom (run manually)
+package.json      Scripts and the break_infinity.js dependency (for the sims)
 ```
-
-### Why a shared `economy.js`
-
-All game rules — generators, upgrades, idols, the meta-shop, the depth ladder,
-the Prestige-Point formula and number formatting — live in `economy.js`. It uses
-a UMD wrapper so the **exact same code** runs in the browser (as
-`window.Economy`) and in Node (the simulator). The balance numbers the simulator
-reports therefore reflect the real game, with no risk of a drifting
-re-implementation. The whole balance surface (idols, meta-upgrades, constants)
-is data-driven — iterate by editing lists, not logic.
 
 ---
 
@@ -68,8 +77,8 @@ https://trombonestevens.github.io/exponent_game/
 **One-time setup** (repo owner, in the GitHub UI): **Settings → Pages →
 Build and deployment → Source: _GitHub Actions_**. After that the workflow runs
 on every push to `main` (and can be re-run from the **Actions** tab). The deploy
-publishes only the browser assets (`index.html`, `styles.css`, `economy.js`,
-`game.js`); the Node simulator is left out of the published site.
+publishes only the browser assets (`index.html`, `styles.css`, `combat.js`,
+`economy.js`, `game.js`); the Node simulator is left out of the published site.
 
 ### Locally
 
@@ -83,15 +92,29 @@ npx serve .          # or: python3 -m http.server 8000
 Then open the shown URL on your phone or in a browser. Opening `index.html`
 directly from disk mostly works too, but a local server is recommended.
 
-**Features:** idle generation (no tapping), 6 generators with exponential cost
-scaling, in-run upgrades, a pick-1-of-3 **idol draft** each run, continuous
-**prestige depth** (P0…Pn), **macro-reset** banking exponential **Prestige
-Points**, a permanent **meta-shop**, offline progress (capped at 12h), autosave
-to `localStorage`, and export/import of saves.
+**Features:** idle auto-attack combat (no tapping), 5 gold-bought upgrade tracks,
+scaling enemies that **cap** into a farming plateau, **boss DPS-check** fights,
+themed stages, offline progress (capped at 12h), autosave to `localStorage`, and
+export/import of saves.
 
 ---
 
-## The balance simulator
+## Balance simulators
+
+Two headless simulators share the game's exact economy modules. Run the combat
+one to tune the Stage-1 loop:
+
+```bash
+npm install
+# Compare buy-strategies; see time to clear the Stage-1 boss:
+node sim/run.js combat --strategies=no-buy,atk-only,round-robin,best-dps-per-gold
+# Tune the pacing knobs:
+node sim/run.js combat --hpGrowth=1.13 --goldGrowth=1.14 --duration=30m
+```
+
+The idle/prestige simulator (below) drives the not-yet-wired `economy.js` layer.
+
+### The idle/prestige simulator
 
 Runs the economy forward in headless time steps, driven by a pluggable strategy
 that plays as an automated player — buying generators/upgrades, drafting idols,

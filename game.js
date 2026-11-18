@@ -1,123 +1,101 @@
-/* Quantum Forge — browser UI layer.
+/* Infinity Slayer — browser UI layer (combat / autobattler).
  *
- * All game-economy logic lives in economy.js (window.Economy); this file is the
- * DOM, timers, input and persistence glue. The game is IDLE: no tapping. The
- * player buys generators/upgrades (energy), drafts one idol per run (pick 1 of
- * 3), macro-resets to bank Prestige Points, and spends those on a permanent
- * meta-shop.
+ * All combat math lives in combat.js (window.Combat); this file is the DOM,
+ * timers, input and persistence glue. The loop is idle: the hero auto-attacks,
+ * enemies drop gold on death, and the player spends gold on 5 upgrade tracks.
+ * Normal enemies cap (flat income plateau); the boss is a pure DPS-check wall
+ * entered on demand (DESIGN §5.1 OQ-3/OQ-4).
+ *
+ * This is the Stage-1 combat prototype. The idle/prestige economy (economy.js)
+ * still exists in the repo for the simulator and as a future prestige layer,
+ * but the player-facing game is now the battler.
  */
 
 "use strict";
 
-const E = window.Economy;
-const D = E.D;
-const { GENERATORS, UPGRADES, META_UPGRADES, CONFIG } = E;
+const C = window.Combat;
+const D = C.D;
+const { UPGRADES, CONFIG } = C;
 
-const SAVE_KEY = "quantum-forge-save-v2";
+const SAVE_KEY = "infinity-slayer-save-v1";
 const TICK_MS = 100;
 const AUTOSAVE_MS = 15000;
 
-/* ---------- State: run (resets) + meta (permanent) ---------- */
-
-let meta = E.freshMeta();
-let run = E.freshRun(meta);
-let derived = E.recompute(run, meta);
-let pendingDraft = null; // idol choices awaiting a pick, or null
-let lastTickAt = Date.now();
-
-function recompute() { derived = E.recompute(run, meta); }
-
-/* ---------- Idol draft ---------- */
-
-function openDraft() {
-  pendingDraft = E.rollIdolChoices(3);
-  const box = document.getElementById("draftChoices");
-  box.innerHTML = "";
-  for (const idol of pendingDraft) {
-    const btn = document.createElement("button");
-    btn.className = "idol-choice" + (idol.rarity === "rare" ? " rare" : "");
-    btn.innerHTML = `
-      <div class="ic-name">${idol.name} <span class="ic-rarity">${idol.rarity}</span></div>
-      <div class="ic-desc">${idol.desc}</div>
-    `;
-    btn.addEventListener("click", () => pickIdol(idol.id));
-    box.appendChild(btn);
-  }
-  document.getElementById("draft").classList.remove("hidden");
+// Stage theming (DESIGN §5.4 ladder). Only Stage 0 is tuned; later stages reuse
+// Stage-1 numbers for now (per-stage escalation is a separate task), but we show
+// their names/sprites so progression reads as the world changing.
+const STAGES = [
+  { name: "Green Meadows", enemy: "Goblin",   sprite: "👺", boss: "Goblin King",   bossSprite: "👹" },
+  { name: "Forest",        enemy: "Wolf",     sprite: "🐺", boss: "Dire Wolf",     bossSprite: "🐺" },
+  { name: "Icy Mountain",  enemy: "Yeti",     sprite: "🦍", boss: "Frost Titan",   bossSprite: "🧊" },
+  { name: "Caverns",       enemy: "Bat",      sprite: "🦇", boss: "Cave Horror",   bossSprite: "🕷" },
+  { name: "Ancient Ruins", enemy: "Wraith",   sprite: "👻", boss: "Lich",          bossSprite: "💀" },
+];
+function stageTheme(stage) {
+  return STAGES[stage % STAGES.length];
 }
 
-function pickIdol(id) {
-  E.chooseIdol(run, id);
-  E.applyIdolStartBonuses(run, meta);
-  pendingDraft = null;
-  document.getElementById("draft").classList.add("hidden");
-  recompute();
-  renderAll();
-  toast(`Idol chosen: ${E.idolDef(id).name}`);
-  save(false);
+/* ---------- State ---------- */
+
+let state = C.freshState();
+let lastTickAt = Date.now();
+
+/* ---------- Combat loop ---------- */
+
+function tick() {
+  const now = Date.now();
+  const dt = Math.min((now - lastTickAt) / 1000, 3600);
+  lastTickAt = now;
+
+  const before = { kills: state.kills, bosses: state.bossesCleared, hp: state.enemyHP };
+  const res = C.damageStep(state, dt, CONFIG);
+
+  // Visual feedback: hero lunges when it deals damage; enemy reacts.
+  if (C.dps(state, CONFIG).gt(0)) {
+    pulseHero();
+    if (res.kills > 0) {
+      if (state.bossesCleared > before.bosses) onBossCleared();
+      flashEnemyDeath();
+    } else {
+      flashEnemyHit();
+    }
+    spawnDamageFloater(res.kills > 0);
+  }
+  renderDynamic();
 }
 
 /* ---------- Actions ---------- */
 
-function buyGenerator(id) {
-  if (E.buyGenerator(run, meta, id)) { recompute(); renderAll(); }
-}
-
 function buyUpgrade(id) {
-  if (E.buyUpgrade(run, meta, id)) {
-    recompute(); renderAll();
-    toast(`Purchased: ${E.upgradeDef(id).name}`);
-  }
-}
-
-function buyMeta(id) {
-  if (E.buyMeta(meta, id)) {
-    recompute(); renderAll();
-    toast(`Upgraded: ${E.metaDef(id).name}`);
+  // Buy as many as affordable in one tap? No — single buy per tap is clearer.
+  if (C.buyUpgrade(state, id, CONFIG)) {
+    renderAll();
     save(false);
   }
 }
 
-function doMacroReset() {
-  const gain = E.pointsOnReset(run, meta);
-  if (gain.lte(0)) return;
-  if (!confirm(`Macro-Reset for ${E.fmt(gain)} Prestige Points?\n\nThis resets your run (energy, generators, upgrades, idols) back to P0. Prestige Points and meta-shop upgrades are permanent. You'll draft a new idol.`)) {
-    return;
-  }
-  E.macroReset(run, meta);
-  recompute();
-  renderAll();
-  toast(`Macro-Reset! +${E.fmt(gain)} ◈`);
-  save(false);
-  openDraft(); // immediately draft a new idol for the fresh run
-}
-
-/* ---------- Idle loop ---------- */
-
-function tick() {
-  if (pendingDraft) { lastTickAt = Date.now(); return; } // pause while drafting
-  const now = Date.now();
-  const dt = Math.min((now - lastTickAt) / 1000, 3600);
-  lastTickAt = now;
-  const prevLevel = E.prestigeLevel(run);
-  E.advanceTime(run, derived, dt);
-  const newLevel = E.prestigeLevel(run);
-  renderDynamic();
-  if (newLevel > prevLevel) {
-    // A tier was crossed this tick; refresh the macro button eligibility.
-    renderDynamic();
+function attemptBoss() {
+  if (C.attemptBoss(state, CONFIG)) {
+    renderAll();
+    toast("Boss fight! Burn it down.");
   }
 }
+
+function onBossCleared() {
+  const t = stageTheme(state.stage);
+  toast(`Stage cleared! Entering ${t.name}.`);
+}
+
+/* ---------- Offline ---------- */
 
 function applyOffline() {
   const now = Date.now();
-  const away = Math.min((now - lastTickAt) / 1000, CONFIG.offlineCapSeconds);
+  const away = Math.min((now - lastTickAt) / 1000, 60 * 60 * 12);
   lastTickAt = now;
-  if (away > 5 && derived.perSec.gt(0)) {
-    const gained = derived.perSec.mul(away).mul(derived.mods.offlineMul);
-    E.addEnergy(run, gained);
+  if (away > 5 && C.dps(state, CONFIG).gt(0)) {
+    const res = C.damageStep(state, away, CONFIG);
     const mins = Math.floor(away / 60);
-    const note = `Welcome back! Away ${mins >= 1 ? mins + "m" : Math.floor(away) + "s"} → +${E.fmt(gained)} energy.`;
+    const note = `Welcome back! Away ${mins >= 1 ? mins + "m" : Math.floor(away) + "s"} → +${C.fmt ? C.fmt(res.goldGained) : res.goldGained} gold, ${res.kills} kills.`;
     document.getElementById("offlineNote").textContent = note;
     toast(note);
   } else {
@@ -125,26 +103,36 @@ function applyOffline() {
   }
 }
 
+/* ---------- Number formatting (local; combat.js has no fmt) ---------- */
+
+const SUFFIXES = ["", "K", "M", "B", "T", "Qa", "Qi", "Sx", "Sp", "Oc", "No", "Dc"];
+function fmt(dec) {
+  const n = D(dec);
+  if (n.lt(1000)) {
+    const num = n.toNumber();
+    if (num !== 0 && num < 10 && !Number.isInteger(num)) return num.toFixed(1);
+    return Math.floor(num).toString();
+  }
+  const exp = n.log10();
+  const tier = Math.floor(exp / 3);
+  if (tier < SUFFIXES.length) {
+    return (n.div(D(10).pow(tier * 3)).toNumber()).toFixed(2) + SUFFIXES[tier];
+  }
+  return n.toExponential(2).replace("e+", "e");
+}
+
 /* ---------- Persistence ---------- */
 
 function serialize() {
   return JSON.stringify({
-    v: 2,
-    run: {
-      energy: run.energy.toString(),
-      totalEarned: run.totalEarned.toString(),
-      generators: run.generators,
-      upgrades: run.upgrades,
-      idols: run.idols,
-      maxDepth: run.maxDepth,
-    },
-    meta: {
-      points: meta.points.toString(),
-      metaLevels: meta.metaLevels,
-      macroResets: meta.macroResets,
-      lifetimePoints: meta.lifetimePoints.toString(),
-    },
-    hasDrafted: run.idols.length > 0,
+    v: 1,
+    gold: state.gold.toString(),
+    kills: state.kills,
+    stage: state.stage,
+    stageKillIndex: state.stageKillIndex,
+    bossesCleared: state.bossesCleared,
+    enemyIsBoss: state.enemyIsBoss,
+    levels: state.levels,
     lastTick: Date.now(),
   });
 }
@@ -153,9 +141,7 @@ function save(announce) {
   try {
     localStorage.setItem(SAVE_KEY, serialize());
     if (announce) toast("Saved.");
-  } catch (e) {
-    toast("Save failed (storage blocked).");
-  }
+  } catch (e) { toast("Save failed (storage blocked)."); }
 }
 
 function load() {
@@ -163,27 +149,21 @@ function load() {
   if (!raw) return false;
   try {
     const o = JSON.parse(raw);
-    meta = E.freshMeta();
-    meta.points = D(o.meta?.points || 0);
-    meta.macroResets = o.meta?.macroResets || 0;
-    meta.lifetimePoints = D(o.meta?.lifetimePoints || 0);
-    for (const m of META_UPGRADES) meta.metaLevels[m.id] = o.meta?.metaLevels?.[m.id] || 0;
-
-    run = E.freshRun(meta);
-    if (o.run) {
-      run.energy = D(o.run.energy || 0);
-      run.totalEarned = D(o.run.totalEarned || run.energy);
-      for (const g of GENERATORS) run.generators[g.id] = o.run.generators?.[g.id] || 0;
-      for (const u of UPGRADES) run.upgrades[u.id] = !!o.run.upgrades?.[u.id];
-      run.idols = Array.isArray(o.run.idols) ? o.run.idols.filter((id) => E.idolDef(id)) : [];
-      run.maxDepth = o.run.maxDepth || 0;
-    }
+    state = C.freshState();
+    state.gold = D(o.gold || 0);
+    state.kills = o.kills || 0;
+    state.stage = o.stage || 0;
+    state.stageKillIndex = o.stageKillIndex || 0;
+    state.bossesCleared = o.bossesCleared || 0;
+    state.enemyIsBoss = !!o.enemyIsBoss;
+    for (const u of UPGRADES) state.levels[u.id] = o.levels?.[u.id] || 0;
+    state.enemyHP = null; // respawn current enemy fresh on load
+    C.ensureEnemy(state, CONFIG);
     lastTickAt = o.lastTick || Date.now();
     return true;
   } catch (e) {
     toast("Save corrupt — starting fresh.");
-    meta = E.freshMeta();
-    run = E.freshRun(meta);
+    state = C.freshState();
     return false;
   }
 }
@@ -200,180 +180,167 @@ function importSave() {
   const data = prompt("Paste your save string:");
   if (!data) return;
   try {
-    const json = decodeURIComponent(escape(atob(data.trim())));
-    localStorage.setItem(SAVE_KEY, json);
+    localStorage.setItem(SAVE_KEY, decodeURIComponent(escape(atob(data.trim()))));
     load();
-    recompute();
     renderAll();
     toast("Save imported.");
-    if (run.idols.length === 0) openDraft();
-  } catch (e) {
-    toast("Invalid save string.");
-  }
+  } catch (e) { toast("Invalid save string."); }
 }
 
 function hardReset() {
-  if (!confirm("Erase EVERYTHING — including permanent Prestige Points and meta-shop upgrades? This cannot be undone.")) return;
+  if (!confirm("Erase all progress? This cannot be undone.")) return;
   localStorage.removeItem(SAVE_KEY);
-  meta = E.freshMeta();
-  run = E.freshRun(meta);
-  recompute();
+  state = C.freshState();
+  lastTickAt = Date.now();
   renderAll();
   toast("Progress reset.");
-  openDraft();
 }
 
-/* ---------- Rendering: static lists ---------- */
+/* ---------- Rendering ---------- */
 
-function buildLists() {
-  const genEl = document.getElementById("tab-generators");
-  genEl.innerHTML = "";
-  for (const g of GENERATORS) {
-    const el = document.createElement("div");
-    el.className = "item";
-    el.id = "gen-" + g.id;
-    el.innerHTML = `
-      <div>
-        <div class="item-name">${g.name} <span class="item-owned" id="owned-${g.id}"></span></div>
-        <div class="item-desc">${g.desc}</div>
-        <div class="item-meta" id="meta-${g.id}"></div>
-      </div>
-      <button class="buy-btn" id="buy-${g.id}">Buy</button>
-    `;
-    genEl.appendChild(el);
-    el.querySelector(`#buy-${g.id}`).addEventListener("click", () => buyGenerator(g.id));
-  }
-
-  const upEl = document.getElementById("tab-upgrades");
-  upEl.innerHTML = "";
+function buildUpgradeList() {
+  const el = document.getElementById("upgradeList");
+  el.innerHTML = "";
   for (const u of UPGRADES) {
-    const el = document.createElement("div");
-    el.className = "item";
-    el.id = "up-" + u.id;
-    el.innerHTML = `
+    const row = document.createElement("div");
+    row.className = "upg";
+    row.id = "upg-" + u.id;
+    row.innerHTML = `
       <div>
-        <div class="item-name">${u.name}</div>
-        <div class="item-desc">${u.desc}</div>
+        <div class="upg-name">${u.name} <span class="lvl" id="lvl-${u.id}"></span></div>
+        <div class="upg-stat" id="stat-${u.id}"></div>
       </div>
-      <button class="buy-btn" id="buyup-${u.id}"></button>
+      <button class="buy-btn" id="buy-${u.id}"></button>
     `;
-    upEl.appendChild(el);
-    el.querySelector(`#buyup-${u.id}`).addEventListener("click", () => buyUpgrade(u.id));
-  }
-
-  const metaEl = document.getElementById("tab-meta");
-  metaEl.innerHTML = "";
-  for (const m of META_UPGRADES) {
-    const el = document.createElement("div");
-    el.className = "item";
-    el.id = "metaitem-" + m.id;
-    el.innerHTML = `
-      <div>
-        <div class="item-name">${m.name}</div>
-        <div class="item-desc">${m.desc}</div>
-        <div class="item-level" id="metalvl-${m.id}"></div>
-      </div>
-      <button class="buy-btn" id="buymeta-${m.id}"></button>
-    `;
-    metaEl.appendChild(el);
-    el.querySelector(`#buymeta-${m.id}`).addEventListener("click", () => buyMeta(m.id));
+    el.appendChild(row);
+    row.querySelector(`#buy-${u.id}`).addEventListener("click", () => buyUpgrade(u.id));
   }
 }
 
-/* ---------- Rendering: dynamic values ---------- */
-
-function renderIdolStrip() {
-  const strip = document.getElementById("idolStrip");
-  strip.innerHTML = "";
-  for (const id of run.idols) {
-    const def = E.idolDef(id);
-    if (!def) continue;
-    const tag = document.createElement("span");
-    tag.className = "idol-tag" + (def.rarity === "rare" ? " rare" : "");
-    tag.textContent = def.name;
-    tag.title = def.desc;
-    strip.appendChild(tag);
+// Human-readable current value of an upgrade's stat.
+function statReadout(u, s) {
+  switch (u.stat) {
+    case "attackDamage": return `${fmt(s.attackDamage)} dmg`;
+    case "attackSpeed": return `${s.attackSpeed.toFixed(2)}/s${s.speedDamageMult > 1 ? ` (×${s.speedDamageMult.toFixed(1)} dmg)` : ""}`;
+    case "goldMult": return `×${fmt(s.goldMult)} gold`;
+    case "critChance": return `${(s.critChance * 100).toFixed(0)}% chance`;
+    case "critMult": return `×${D(s.critMult).toNumber().toFixed(2)} crit dmg`;
+    default: return "";
   }
-}
-
-function renderDepth() {
-  const depth = E.depthFromEnergy(run.totalEarned);
-  const level = Math.floor(depth);
-  const frac = depth - level;
-  document.getElementById("depthLevel").textContent = "P" + level;
-  document.getElementById("depthFill").style.width = (frac * 100).toFixed(1) + "%";
-  const nextThreshold = E.levelThreshold(level + 1);
-  document.getElementById("depthNext").textContent =
-    `next: ${E.fmt(nextThreshold)} (${(frac * 100).toFixed(0)}%)`;
 }
 
 function renderDynamic() {
-  document.getElementById("energyValue").textContent = E.fmt(run.energy);
-  document.getElementById("energyRate").textContent = E.fmt(derived.perSec) + " / sec";
-  document.getElementById("pointsValue").textContent = E.fmt(meta.points);
-  document.getElementById("resetCount").textContent = meta.macroResets;
+  const s = C.stats(state, CONFIG);
+  document.getElementById("goldValue").textContent = fmt(state.gold);
+  document.getElementById("dpsValue").textContent = fmt(C.dps(state, CONFIG));
 
-  renderDepth();
-  renderIdolStrip();
+  // Stage + enemy.
+  const theme = stageTheme(state.stage);
+  document.getElementById("stageName").textContent = theme.name;
+  const ready = C.bossReady(state, CONFIG);
+  document.getElementById("stageKills").textContent =
+    state.enemyIsBoss ? "BOSS" : `${Math.min(state.stageKillIndex, CONFIG.stageKills)} / ${CONFIG.stageKills}`;
 
-  const pg = E.pointsOnReset(run, meta);
-  document.getElementById("pointsGain").textContent = E.fmt(pg);
-  document.getElementById("macroBtn").disabled = pg.lte(0);
-
-  for (let idx = 0; idx < GENERATORS.length; idx++) {
-    const g = GENERATORS[idx];
-    const owned = run.generators[g.id];
-    const cost = E.genCost(g, owned, derived.mods);
-    const btn = document.getElementById("buy-" + g.id);
-    btn.disabled = run.energy.lt(cost);
-    btn.innerHTML = `Buy<small>${E.fmt(cost)}</small>`;
-    document.getElementById("owned-" + g.id).textContent = owned > 0 ? `×${owned}` : "";
-    const per = derived.genProd[g.id] || D(g.baseProd);
-    document.getElementById("meta-" + g.id).textContent =
-      `${E.fmt(per)}/s each · total ${E.fmt(per.mul(owned))}/s`;
-    const item = document.getElementById("gen-" + g.id);
-    const unlocked =
-      idx === 0 ||
-      run.generators[GENERATORS[idx - 1].id] > 0 ||
-      owned > 0 ||
-      run.energy.gte(cost.div(3));
-    item.classList.toggle("locked", !unlocked);
+  const enemyEl = document.getElementById("enemy");
+  const stageEl = document.getElementById("stage");
+  if (state.enemyIsBoss) {
+    document.getElementById("enemySprite").textContent = theme.bossSprite;
+    document.getElementById("enemyName").textContent = theme.boss;
+    enemyEl.classList.add("boss");
+    stageEl.classList.add("boss-fight");
+  } else {
+    document.getElementById("enemySprite").textContent = theme.sprite;
+    document.getElementById("enemyName").textContent = theme.enemy;
+    enemyEl.classList.remove("boss");
+    stageEl.classList.remove("boss-fight");
   }
 
-  for (const u of UPGRADES) {
-    const btn = document.getElementById("buyup-" + u.id);
-    const cost = E.upgradeCost(u, derived.mods);
-    if (run.upgrades[u.id]) {
-      btn.textContent = "Owned ✓";
-      btn.classList.add("bought");
-      btn.disabled = true;
+  // HP bar.
+  const hp = state.enemyHP || D(0);
+  const maxHp = state.enemyMaxHP || D(1);
+  const pct = Math.max(0, Math.min(100, hp.div(maxHp).toNumber() * 100));
+  document.getElementById("hpFill").style.width = pct + "%";
+  document.getElementById("hpText").textContent = `${fmt(hp)} / ${fmt(maxHp)}`;
+
+  // Boss button + hint.
+  const bossBtn = document.getElementById("bossBtn");
+  const bossHint = document.getElementById("bossHint");
+  if (ready && !state.enemyIsBoss) {
+    bossBtn.classList.remove("hidden");
+    const check = C.bossDpsCheck(CONFIG);
+    const myDps = C.dps(state, CONFIG);
+    if (myDps.gte(check)) {
+      bossHint.textContent = `Your DPS clears the boss (~${fmt(check)} needed).`;
+      bossHint.classList.remove("warn");
     } else {
-      btn.classList.remove("bought");
-      btn.innerHTML = `Buy<small>${E.fmt(cost)}</small>`;
-      btn.disabled = run.energy.lt(cost);
+      bossHint.textContent = `Boss needs ~${fmt(check)} DPS — you have ${fmt(myDps)}. Grind more!`;
+      bossHint.classList.add("warn");
     }
+  } else if (state.enemyIsBoss) {
+    bossBtn.classList.add("hidden");
+    bossHint.textContent = "Boss fight in progress — pure DPS race.";
+    bossHint.classList.remove("warn");
+  } else {
+    bossBtn.classList.add("hidden");
+    bossHint.textContent = "";
   }
 
-  for (const m of META_UPGRADES) {
-    const lvl = meta.metaLevels[m.id] || 0;
-    document.getElementById("metalvl-" + m.id).textContent = `Level ${lvl} / ${m.max}`;
-    const btn = document.getElementById("buymeta-" + m.id);
-    if (lvl >= m.max) {
+  // Upgrades.
+  for (const u of UPGRADES) {
+    document.getElementById("lvl-" + u.id).textContent = `Lv ${state.levels[u.id]}`;
+    document.getElementById("stat-" + u.id).textContent = statReadout(u, s);
+    const btn = document.getElementById("buy-" + u.id);
+    const capped = u.cap != null && C.statValue(u, state.levels[u.id]) >= u.cap;
+    if (capped) {
       btn.textContent = "MAX";
       btn.classList.add("maxed");
       btn.disabled = true;
     } else {
-      const cost = E.metaCost(m, lvl);
+      const cost = C.upgradeCost(u, state.levels[u.id]);
       btn.classList.remove("maxed");
-      btn.innerHTML = `Buy<small>${E.fmt(cost)} ◈</small>`;
-      btn.disabled = meta.points.lt(cost);
+      btn.innerHTML = `Level Up<small>🪙 ${fmt(cost)}</small>`;
+      btn.disabled = state.gold.lt(cost);
     }
   }
 }
 
-function renderAll() {
-  recompute();
-  renderDynamic();
+function renderAll() { renderDynamic(); }
+
+/* ---------- Visual feedback ---------- */
+
+function pulseHero() {
+  const h = document.getElementById("hero");
+  h.classList.remove("attack");
+  void h.offsetWidth; // restart animation
+  h.classList.add("attack");
+}
+
+function flashEnemyHit() {
+  const e = document.getElementById("enemy");
+  e.classList.remove("hit");
+  void e.offsetWidth;
+  e.classList.add("hit");
+}
+
+function flashEnemyDeath() {
+  const e = document.getElementById("enemy");
+  e.classList.add("dying");
+  setTimeout(() => e.classList.remove("dying"), 200);
+}
+
+function spawnDamageFloater(isKill) {
+  const box = document.getElementById("floaters");
+  const f = document.createElement("div");
+  const s = C.stats(state, CONFIG);
+  // Show a representative hit (expected per-swing damage).
+  const perHit = D(s.attackDamage).mul(s.speedDamageMult).mul(s.critFactor);
+  const isCrit = s.critChance > 0 && Math.random() < s.critChance;
+  f.className = "floater" + (isCrit ? " crit" : "");
+  const shown = isCrit ? perHit.mul(D(s.critMult).div(s.critFactor)) : perHit;
+  f.textContent = (isCrit ? "✸ " : "") + fmt(shown);
+  f.style.left = (45 + Math.random() * 10) + "%";
+  box.appendChild(f);
+  setTimeout(() => f.remove(), 700);
 }
 
 /* ---------- UI helpers ---------- */
@@ -390,16 +357,7 @@ function toast(msg) {
 /* ---------- Wiring ---------- */
 
 function bindUI() {
-  document.getElementById("macroBtn").addEventListener("click", doMacroReset);
-
-  document.querySelectorAll(".tab").forEach((tab) => {
-    tab.addEventListener("click", () => {
-      document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
-      document.querySelectorAll(".tab-content").forEach((c) => c.classList.remove("active"));
-      tab.classList.add("active");
-      document.getElementById("tab-" + tab.dataset.tab).classList.add("active");
-    });
-  });
+  document.getElementById("bossBtn").addEventListener("click", attemptBoss);
 
   const sheet = document.getElementById("sheet");
   document.getElementById("menuBtn").addEventListener("click", () => sheet.classList.remove("hidden"));
@@ -418,20 +376,17 @@ function bindUI() {
 /* ---------- Boot ---------- */
 
 function init() {
-  if (typeof Decimal === "undefined" || !window.Economy) {
+  if (typeof Decimal === "undefined" || !window.Combat) {
     document.body.innerHTML =
       '<p style="color:#fff;font-family:sans-serif;padding:24px">Failed to load break_infinity.js (check your network connection).</p>';
     return;
   }
-  const hadSave = load();
-  buildLists();
-  recompute();
+  load();
+  C.ensureEnemy(state, CONFIG);
+  buildUpgradeList();
   applyOffline();
   renderAll();
   bindUI();
-
-  // New player or a fresh run with no idol yet: open the draft.
-  if (run.idols.length === 0) openDraft();
 
   setInterval(tick, TICK_MS);
   setInterval(() => save(false), AUTOSAVE_MS);
