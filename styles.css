@@ -97,20 +97,22 @@ html, body {
 .hero { text-align: center; }
 
 /* Hero sprite animation (CraftPix swordsman, lvl1).
- * Each sheet is a horizontal strip of 64x256 frames. We show one 64px-wide
- * window and step background-position across the frames.
- * --scale enlarges the pixel art; --atk-dur is set from JS to match attack cadence. */
+ * Each sheet is a GRID: 4 directional rows (down / left / right / up), each 64px
+ * tall, with the animation frames laid out across the row's width. We want the
+ * RIGHT-facing row (row index 2 => background-position-y: -128px) and step
+ * background-position-x across that row's frames only.
+ * --scale enlarges the pixel art; --atk-dur is set from JS to match cadence. */
 .hero-sprite {
-  --scale: 0.82;
+  --scale: 2.6;
   --atk-dur: 0.4s;
   width: 64px;
-  height: 256px;
+  height: 64px;                    /* one frame cell, not the full 256 sheet */
   transform: scale(var(--scale));
   transform-origin: center center;
   margin: 0 auto;
   background-repeat: no-repeat;
   background-image: url("assets/hero/swordsman_idle.png");
-  background-position: 0 0;
+  background-position: 0 -128px;   /* row 2 = right-facing */
   image-rendering: pixelated;      /* crisp pixel-art scaling */
   image-rendering: crisp-edges;
   animation: hero-idle 1.6s steps(12) infinite;
@@ -120,8 +122,9 @@ html, body {
   background-image: url("assets/hero/swordsman_attack.png");
   animation: hero-attack var(--atk-dur) steps(8) 1;
 }
-@keyframes hero-idle   { from { background-position: 0 0; } to { background-position: -768px 0; } }  /* 12 * 64 */
-@keyframes hero-attack { from { background-position: 0 0; } to { background-position: -512px 0; } }  /* 8 * 64 */
+/* Animate x across the right-facing row; keep y pinned to row 2 (-128px). */
+@keyframes hero-idle   { from { background-position: 0 -128px; } to { background-position: -768px -128px; } }  /* 12 * 64 */
+@keyframes hero-attack { from { background-position: 0 -128px; } to { background-position: -512px -128px; } }  /* 8 * 64 */
 
 .combat-space { position: relative; text-align: center; height: 140px; display: flex; flex-direction: column; justify-content: center; }
 .dps-readout { font-size: 13px; color: var(--accent-2); font-weight: 700; }
