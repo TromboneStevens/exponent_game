@@ -9,18 +9,13 @@ The player character animations (`assets/hero/swordsman_*.png`, extracted from
 - **Source:** https://craftpix.net/freebies/free-swordsman-1-3-level-pixel-top-down-sprite-character/
 - **Author:** CraftPix.net
 
-Used under the CraftPix **Free License**. Attribution is provided here as the
-license requires.
+Used under the CraftPix **Free License**
+(https://craftpix.net/file-licenses/). Attribution is provided here as a
+courtesy and record of source.
 
-> **License note (action needed by the project owner):** CraftPix's free license
-> permits use in games but places conditions on **redistribution of the raw asset
-> files** (e.g. they generally may not be re-shared, re-sold, or published as
-> standalone assets). Because this repository is **public**, the committed sprite
-> files are effectively redistributed. Please review the exact license terms that
-> accompanied your download and confirm this use is permitted, or consider:
->   - keeping the game public but hosting the art separately, or
->   - making the repo private, or
->   - replacing these with assets whose license explicitly allows public-repo
->     redistribution (e.g. CC0 / public-domain packs).
->
-> This note is a flag, not legal advice.
+Per the Freebie Products terms (§2.1), the assets may be used and modified in any
+number of personal and commercial projects, and games built with them may be
+distributed. This project uses the sprites inside the game, which the license
+permits. The one thing the license does not allow is re-selling or re-sharing the
+**raw asset pack** as standalone downloadable assets — which this project does
+not do.
