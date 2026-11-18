@@ -59,7 +59,9 @@ function run() {
 
   console.log("dom: starting arena");
   ok("stage name shows Green Meadows", /Green Meadows/.test($("stageName").textContent));
-  ok("first enemy is a Goblin", /Goblin/.test($("enemyName").textContent));
+  ok("first enemy is a Slime", /Slime/.test($("enemyName").textContent));
+  ok("slime uses the animated sprite", $("enemySprite").classList.contains("is-sprite"));
+  ok("slime color assigned (random)", /slime\/(green|red|blue)\//.test($("enemySprite").getAttribute("style") || ""));
   ok("HP bar starts full", $("hpFill").style.width === "100%");
   ok("DPS readout matches starting stats", $("dpsValue").textContent === "0.8");
   ok("hero sprite element present (sprite pack wired)", !!$("heroSprite"));
