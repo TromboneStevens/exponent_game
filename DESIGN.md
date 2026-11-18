@@ -186,13 +186,19 @@ Tuned with `node sim/run.js combat` (see §8). **First-pass defaults** now in
 - Upgrade cost multipliers raised (atk ×1.15, spd ×1.5, gold ×1.25, critChance
   ×1.4, critDmg ×1.35) so spend keeps pace with exponential HP.
 - `baseHP 4`, `hpGrowth 1.12`; `baseGold 4`, `goldGrowth 1.14`.
+- **Attack speed lowered for animation readability** (OQ-10 resolved): base
+  `0.8/s` (was 1.0), soft cap `2.5/s` (was 5.0). This keeps the hero's 8-frame
+  attack sprite legible rather than blurring; starting DPS is 0.8 (goblin dies in
+  ~5s / ~4 swings). The sim confirmed pacing holds (boss still clears Stage 1 in
+  ~4 min) — the DPS once supplied by raw speed now comes from the overflow-damage
+  multiplier and the other stats.
 
 Now also models the boss/cap decisions (OQ-3/OQ-4): `stageKills 40`, HP/gold cap
 at kill 40, boss HP = capped-stage-end HP × 25 (DPS-check ≈ 465 at Stage 1).
 
 **Findings:**
-- **Starting feel is right:** 1st goblin dies in **4s**, kill 5 ~20s, kill 10
-  ~31s — snappy early game matching the "4–5 hits" target.
+- **Starting feel is right:** 1st goblin dies in **~5s**, kill 10 ~39s — a calm,
+  readable opening (one swing every 1.25s at base speed).
 - **`hpGrowth` vs `goldGrowth` is THE pre-cap knob.** The gap sets how fast DPS
   climbs vs enemies before the cap. Picked `hpGrowth 1.12` under `goldGrowth 1.14`.
 - **The cap (OQ-4) creates the intended plateau.** Past kill 40, normals are flat,
@@ -368,7 +374,10 @@ piece of net-new work on the table. Prototype it small first.
 - **OQ-9 — Per-stage currencies?** Do deep-earth / dimension stages introduce
   their own currencies (gems, elements), or stay on gold until a formal subsystem
   unlocks? Ties into the currency ladder.
-- **OQ-10 — Attack-speed soft cap.** Current: literal swings cap at 5/s, overflow
+- **OQ-10 — Attack-speed soft cap: RESOLVED → 2.5/s** (base 0.8/s). Lowered from
+  5/s so the hero attack animation stays readable; overflow past the cap still
+  becomes a damage multiplier. Historical note below.
+- **OQ-10 (orig) — Attack-speed soft cap.** Current: literal swings cap at 5/s, overflow
   becomes a flat damage multiplier. Cap value TBD.
 - **OQ-11 — Crit-chance cap.** Set to 60% for now so the EV model stays sane.
 - **OQ-12 — Does gold feed depth/prestige,** or is depth = stage/kills only?
