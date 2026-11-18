@@ -131,12 +131,45 @@ html, body {
 .dps-readout b { font-size: 15px; }
 .floaters { position: absolute; inset: 0; pointer-events: none; }
 
-.enemy { text-align: center; width: 110px; }
-.enemy.boss .enemy-sprite { font-size: 72px; }
-.enemy.hit { animation: shake 0.12s ease; }
-@keyframes shake { 0%,100% { transform: translateX(0); } 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
-.enemy.dying { animation: die 0.25s ease forwards; }
-@keyframes die { to { transform: scale(0.2) rotate(20deg); opacity: 0; } }
+.enemy { text-align: center; width: 128px; display: flex; flex-direction: column; align-items: center; }
+
+/* Slime enemy sprite (CraftPix). Horizontal strips of 128x128 frames, single
+ * row. Color is chosen per-spawn via --slime-idle/--slime-hurt/--slime-dead URLs
+ * set from JS. The slime blob sits in the bottom quarter of the frame, so we
+ * bottom-anchor the cell. Idle 8f, Hurt 6f, Dead 3f. */
+/* Emoji-placeholder enemies (stages without real art yet). */
+.enemy-sprite { font-size: 64px; line-height: 1; filter: drop-shadow(0 4px 6px rgba(0,0,0,0.5)); }
+.enemy.boss .enemy-sprite:not(.is-sprite) { font-size: 84px; }
+
+/* Animated sprite enemies (e.g. slime): only when .is-sprite is set. */
+.enemy-sprite.is-sprite {
+  --escale: 1.25;
+  width: 128px;
+  height: 128px;
+  font-size: 0;
+  filter: none;
+  transform: scale(var(--escale));
+  transform-origin: center bottom;
+  background-repeat: no-repeat;
+  background-image: var(--slime-idle);
+  background-position: 0 0;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  animation: slime-idle 1.1s steps(8) infinite;
+}
+.enemy-sprite.is-sprite.hurt {
+  background-image: var(--slime-hurt);
+  animation: slime-hurt 0.3s steps(6) 1;
+}
+.enemy-sprite.is-sprite.dead {
+  background-image: var(--slime-dead);
+  animation: slime-dead 0.25s steps(3) 1 forwards;
+}
+.enemy.boss .enemy-sprite.is-sprite { --escale: 1.9; }   /* bosses are bigger slimes (for now) */
+@keyframes slime-idle { from { background-position: 0 0; } to { background-position: -1024px 0; } } /* 8*128 */
+@keyframes slime-hurt { from { background-position: 0 0; } to { background-position: -768px 0; } }  /* 6*128 */
+@keyframes slime-dead { from { background-position: 0 0; } to { background-position: -384px 0; } }  /* 3*128 */
+
 .enemy-name { font-size: 12px; font-weight: 600; margin-top: 2px; }
 .enemy.boss .enemy-name { color: var(--boss); font-weight: 800; }
 

@@ -24,8 +24,10 @@ const AUTOSAVE_MS = 15000;
 // Stage theming (DESIGN §5.4 ladder). Only Stage 0 is tuned; later stages reuse
 // Stage-1 numbers for now (per-stage escalation is a separate task), but we show
 // their names/sprites so progression reads as the world changing.
+// `art: "slime"` means the enemy/boss uses the animated slime sprite; otherwise
+// `sprite`/`bossSprite` emoji are placeholders until real art lands.
 const STAGES = [
-  { name: "Green Meadows", enemy: "Goblin",   sprite: "👺", boss: "Goblin King",   bossSprite: "👹" },
+  { name: "Green Meadows", enemy: "Slime",    art: "slime", boss: "Giant Slime",  bossArt: "slime" },
   { name: "Forest",        enemy: "Wolf",     sprite: "🐺", boss: "Dire Wolf",     bossSprite: "🐺" },
   { name: "Icy Mountain",  enemy: "Yeti",     sprite: "🦍", boss: "Frost Titan",   bossSprite: "🧊" },
   { name: "Caverns",       enemy: "Bat",      sprite: "🦇", boss: "Cave Horror",   bossSprite: "🕷" },
@@ -33,6 +35,22 @@ const STAGES = [
 ];
 function stageTheme(stage) {
   return STAGES[stage % STAGES.length];
+}
+
+/* ---------- Slime sprite (enemy) ---------- */
+
+const SLIME_COLORS = ["green", "red", "blue"];
+let currentSlimeColor = null;
+
+// Roll a new random slime color and point the CSS vars at that color's sheets.
+function rollSlimeColor() {
+  currentSlimeColor = SLIME_COLORS[Math.floor(Math.random() * SLIME_COLORS.length)];
+  const sprite = document.getElementById("enemySprite");
+  if (!sprite) return;
+  const base = `assets/enemies/slime/${currentSlimeColor}`;
+  sprite.style.setProperty("--slime-idle", `url("${base}/idle.png")`);
+  sprite.style.setProperty("--slime-hurt", `url("${base}/hurt.png")`);
+  sprite.style.setProperty("--slime-dead", `url("${base}/dead.png")`);
 }
 
 /* ---------- State ---------- */
@@ -260,16 +278,24 @@ function renderDynamic() {
 
   const enemyEl = document.getElementById("enemy");
   const stageEl = document.getElementById("stage");
-  if (state.enemyIsBoss) {
-    document.getElementById("enemySprite").textContent = theme.bossSprite;
-    document.getElementById("enemyName").textContent = theme.boss;
-    enemyEl.classList.add("boss");
-    stageEl.classList.add("boss-fight");
+  const sprite = document.getElementById("enemySprite");
+  const isBoss = state.enemyIsBoss;
+  const useSlime = isBoss ? theme.bossArt === "slime" : theme.art === "slime";
+
+  document.getElementById("enemyName").textContent = isBoss ? theme.boss : theme.enemy;
+  enemyEl.classList.toggle("boss", isBoss);
+  stageEl.classList.toggle("boss-fight", isBoss);
+
+  if (useSlime) {
+    // Animated slime sprite: clear any emoji, ensure a color is assigned.
+    sprite.classList.add("is-sprite");
+    sprite.textContent = "";
+    if (!currentSlimeColor) rollSlimeColor();
   } else {
-    document.getElementById("enemySprite").textContent = theme.sprite;
-    document.getElementById("enemyName").textContent = theme.enemy;
-    enemyEl.classList.remove("boss");
-    stageEl.classList.remove("boss-fight");
+    // Emoji placeholder for stages without real art yet.
+    sprite.classList.remove("is-sprite");
+    sprite.style.removeProperty("--slime-idle");
+    sprite.textContent = isBoss ? theme.bossSprite : theme.sprite;
   }
 
   // HP bar.
@@ -337,26 +363,50 @@ function playAttack(periodSeconds) {
   sprite.classList.add("attacking");
 }
 
-// When the attack animation ends, fall back to idle (handled once via listener).
-function bindHeroAnimation() {
-  const sprite = document.getElementById("heroSprite");
-  if (!sprite) return;
-  sprite.addEventListener("animationend", (e) => {
-    if (e.animationName === "hero-attack") sprite.classList.remove("attacking");
+// When a one-shot animation ends, return the sprite to its idle loop.
+function bindSpriteAnimations() {
+  const hero = document.getElementById("heroSprite");
+  if (hero) hero.addEventListener("animationend", (e) => {
+    if (e.animationName === "hero-attack") hero.classList.remove("attacking");
+  });
+  const enemy = document.getElementById("enemySprite");
+  if (enemy) enemy.addEventListener("animationend", (e) => {
+    // Hurt returns to idle; Dead is cleared by flashEnemyDeath's timeout.
+    if (e.animationName === "slime-hurt") enemy.classList.remove("hurt");
   });
 }
 
+// Play the slime's Hurt animation once (sprite enemies only). For emoji
+// placeholders, a quick shake via inline transform.
 function flashEnemyHit() {
-  const e = document.getElementById("enemy");
-  e.classList.remove("hit");
-  void e.offsetWidth;
-  e.classList.add("hit");
+  const sprite = document.getElementById("enemySprite");
+  if (!sprite) return;
+  if (sprite.classList.contains("is-sprite")) {
+    if (sprite.classList.contains("dead")) return; // don't interrupt a death
+    sprite.classList.remove("hurt");
+    void sprite.offsetWidth;
+    sprite.classList.add("hurt");
+  } else {
+    sprite.animate(
+      [{ transform: "translateX(0)" }, { transform: "translateX(-4px)" }, { transform: "translateX(4px)" }, { transform: "translateX(0)" }],
+      { duration: 120 }
+    );
+  }
 }
 
+// Play the slime's Dead animation, then roll a fresh random color for the next
+// slime so each spawn can be a different color.
 function flashEnemyDeath() {
-  const e = document.getElementById("enemy");
-  e.classList.add("dying");
-  setTimeout(() => e.classList.remove("dying"), 200);
+  const sprite = document.getElementById("enemySprite");
+  if (!sprite) return;
+  if (sprite.classList.contains("is-sprite")) {
+    sprite.classList.remove("hurt");
+    sprite.classList.add("dead");
+    setTimeout(() => {
+      sprite.classList.remove("dead");
+      rollSlimeColor(); // next slime is a new random color
+    }, 250);
+  }
 }
 
 function spawnDamageFloater() {
@@ -415,7 +465,8 @@ function init() {
   load();
   C.ensureEnemy(state, CONFIG);
   buildUpgradeList();
-  bindHeroAnimation();
+  bindSpriteAnimations();
+  rollSlimeColor();       // assign the first slime a random color
   applyOffline();
   renderAll();
   bindUI();
