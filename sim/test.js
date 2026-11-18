@@ -151,9 +151,11 @@ console.log("combat: starting feel + DPS formula");
 {
   const st = C.freshState();
   const s = C.stats(st);
-  ok("starts at 1 dmg, 1 atk/s", C.D(s.attackDamage).eq(1) && s.attackSpeed === 1);
-  ok("starting DPS = 1", C.dps(st).eq(1));
-  ok("goblin dies in ~4 hits (baseHP 4 vs 1 dmg)", C.spawnHP(0).eq(4));
+  // Attack speed lowered (1.0 -> 0.8) so the hero's attack animation reads
+  // cleanly; damage left at 1, so starting DPS is 0.8 (goblin ~5s / ~4 swings).
+  ok("starts at 1 dmg, 0.8 atk/s", C.D(s.attackDamage).eq(1) && s.attackSpeed === 0.8);
+  ok("starting DPS = 0.8", C.dps(st).eq("0.8"));
+  ok("goblin has 4 HP (~4-5 swings to kill)", C.spawnHP(0).eq(4));
   // crit EV: 50% chance @ 2x => factor 1.5
   st.levels.critchance = 50; st.levels.critdmg = 18; // chance .5 (capped .6 ok), mult 1.1+.9=2.0
   const s2 = C.stats(st);

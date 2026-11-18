@@ -61,18 +61,21 @@ function run() {
   ok("stage name shows Green Meadows", /Green Meadows/.test($("stageName").textContent));
   ok("first enemy is a Goblin", /Goblin/.test($("enemyName").textContent));
   ok("HP bar starts full", $("hpFill").style.width === "100%");
-  ok("DPS readout starts at 1", $("dpsValue").textContent === "1");
+  ok("DPS readout matches starting stats", $("dpsValue").textContent === "0.8");
+  ok("hero sprite element present (sprite pack wired)", !!$("heroSprite"));
   ok("boss button hidden at start", $("bossBtn").classList.contains("hidden"));
 
   console.log("dom: combat progresses");
-  // The 100ms tick is driven by setInterval inside the game; advance real time.
-  setTimeout(stepTwo, 500);
+  // Starting swing cadence is ~1.25s; wait long enough for at least one swing.
+  setTimeout(stepTwo, 1600);
 }
 
 function stepTwo() {
-  // After ~0.5s of auto-attack (1 DPS vs 4 HP goblin) the HP bar should drop.
+  // After ~0.5s of auto-attack the HP bar should drop.
   const width = parseFloat($("hpFill").style.width);
   ok("enemy HP bar decreases from auto-attack", width < 100);
+  // A swing should have fired, playing the attack animation at least once.
+  ok("hero attack animation triggers on swing", $("heroSprite").classList.contains("attacking"));
 
   console.log("dom: buying upgrades");
   // Grant gold directly via the shared state is internal; instead simulate by

@@ -35,7 +35,7 @@
   // pace with exponential enemy HP and Stage 1 lasts a sane while, not minutes.
   const UPGRADES = [
     { id: "atk",      name: "Attack Damage", stat: "attackDamage", mode: "addPerLevel", base: 1,   perLevel: 1,    unbounded: true, costBase: "10", costMul: 1.15 },
-    { id: "spd",      name: "Attack Speed",  stat: "attackSpeed",  mode: "addPerLevel", base: 1.0, perLevel: 0.1,  costBase: "50", costMul: 1.5,  softCap: 5.0 },
+    { id: "spd",      name: "Attack Speed",  stat: "attackSpeed",  mode: "addPerLevel", base: 0.8, perLevel: 0.1,  costBase: "50", costMul: 1.5,  softCap: 2.5 },
     { id: "gold",     name: "Gold Drop",     stat: "goldMult",     mode: "mulPerLevel", base: 1,   perLevel: 0.08, costBase: "30", costMul: 1.25 },
     { id: "critchance", name: "Crit Chance", stat: "critChance",   mode: "addPerLevel", base: 0,   perLevel: 0.01, costBase: "100", costMul: 1.4, cap: 0.60 },
     { id: "critdmg",  name: "Crit Damage",   stat: "critMult",     mode: "addPerLevel", base: 1.1, perLevel: 0.05, unbounded: true, costBase: "150", costMul: 1.35 },
@@ -61,7 +61,9 @@
     bossRefWindow: 20,  // "reasonable" clear time (s) used for the DPS-check readout
 
     // Attack-speed soft cap: beyond softCap, extra speed -> damage multiplier.
-    speedSoftCap: 5.0,
+    // Lowered 5.0 -> 2.5 so the hero's attack animation (8 frames) stays
+    // readable rather than blurring; overflow past the cap still boosts damage.
+    speedSoftCap: 2.5,
   };
 
   function upgradeDef(id) { return UPGRADES.find((u) => u.id === id); }

@@ -47,21 +47,38 @@ function tick() {
   const dt = Math.min((now - lastTickAt) / 1000, 3600);
   lastTickAt = now;
 
-  const before = { kills: state.kills, bosses: state.bossesCleared, hp: state.enemyHP };
-  const res = C.damageStep(state, dt, CONFIG);
+  const before = { bosses: state.bossesCleared };
+  C.damageStep(state, dt, CONFIG);
+  if (state.bossesCleared > before.bosses) onBossCleared();
 
-  // Visual feedback: hero lunges when it deals damage; enemy reacts.
-  if (C.dps(state, CONFIG).gt(0)) {
-    pulseHero();
-    if (res.kills > 0) {
-      if (state.bossesCleared > before.bosses) onBossCleared();
-      flashEnemyDeath();
-    } else {
-      flashEnemyHit();
-    }
-    spawnDamageFloater(res.kills > 0);
-  }
+  // Drive the hero's visible swing on its ACTUAL attack cadence (not the 100ms
+  // sim tick), so the animation matches the readable swing rate.
+  advanceSwings(dt);
+
   renderDynamic();
+}
+
+/* ---------- Swing scheduler (visual) ----------
+ * Fires the attack animation + a damage floater once per real swing, paced by
+ * effectiveAttackSpeed. Enemy reacts (hit/death flash) on each swing. */
+let swingCooldown = 0;
+
+function advanceSwings(dt) {
+  const s = C.stats(state, CONFIG);
+  const rate = s.effectiveAttackSpeed; // swings/sec (already capped)
+  if (rate <= 0) return;
+  swingCooldown -= dt;
+  let swings = 0;
+  // Catch up, but cap bursts so offline/large dt don't spam the DOM.
+  while (swingCooldown <= 0 && swings < 4) {
+    swingCooldown += 1 / rate;
+    swings++;
+    const period = 1 / rate;
+    playAttack(period);
+    const enemyDyingSoon = state.enemyHP && state.enemyHP.lte(C.dps(state, CONFIG).div(rate));
+    if (enemyDyingSoon) flashEnemyDeath(); else flashEnemyHit();
+    spawnDamageFloater();
+  }
 }
 
 /* ---------- Actions ---------- */
@@ -308,11 +325,25 @@ function renderAll() { renderDynamic(); }
 
 /* ---------- Visual feedback ---------- */
 
-function pulseHero() {
-  const h = document.getElementById("hero");
-  h.classList.remove("attack");
-  void h.offsetWidth; // restart animation
-  h.classList.add("attack");
+// Play the swordsman's attack animation once, timed to the swing period so it
+// finishes before the next swing (clamped so it never looks frantic or sluggish).
+function playAttack(periodSeconds) {
+  const sprite = document.getElementById("heroSprite");
+  if (!sprite) return;
+  const dur = Math.max(0.22, Math.min(periodSeconds * 0.9, 1.0));
+  sprite.style.setProperty("--atk-dur", dur.toFixed(2) + "s");
+  sprite.classList.remove("attacking");
+  void sprite.offsetWidth; // restart the animation
+  sprite.classList.add("attacking");
+}
+
+// When the attack animation ends, fall back to idle (handled once via listener).
+function bindHeroAnimation() {
+  const sprite = document.getElementById("heroSprite");
+  if (!sprite) return;
+  sprite.addEventListener("animationend", (e) => {
+    if (e.animationName === "hero-attack") sprite.classList.remove("attacking");
+  });
 }
 
 function flashEnemyHit() {
@@ -328,7 +359,7 @@ function flashEnemyDeath() {
   setTimeout(() => e.classList.remove("dying"), 200);
 }
 
-function spawnDamageFloater(isKill) {
+function spawnDamageFloater() {
   const box = document.getElementById("floaters");
   const f = document.createElement("div");
   const s = C.stats(state, CONFIG);
@@ -384,6 +415,7 @@ function init() {
   load();
   C.ensureEnemy(state, CONFIG);
   buildUpgradeList();
+  bindHeroAnimation();
   applyOffline();
   renderAll();
   bindUI();
